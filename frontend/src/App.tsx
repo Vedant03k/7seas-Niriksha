@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Activity, Layers, Image as ImageIcon, FileVideo, Music, LogOut, LogIn, Loader2, Zap } from 'lucide-react';
 import { useAuth0 } from '@auth0/auth0-react';
 import DetectorTab from './components/DetectorTab';
+import ImageDetectorTab from './components/ImageDetectorTab';
 import nirikshaLogo from './assets/nirikshalogo.png';
 
 type TabType = 'COMBINED' | 'IMAGE' | 'VIDEO' | 'AUDIO';
@@ -135,7 +136,9 @@ function App() {
           <div className="absolute bottom-0 left-0 w-64 h-64 bg-indigo-400/10 rounded-full blur-[60px] pointer-events-none" />
           
           <div className="relative z-10">
-            {currentTabInfo && (
+            {activeTab === 'IMAGE' ? (
+              <ImageDetectorTab />
+            ) : currentTabInfo ? (
               <DetectorTab 
                 key={activeTab} 
                 acceptType={currentTabInfo.accept}
@@ -144,7 +147,7 @@ function App() {
                 credits={credits}
                 setCredits={setCredits}
               />
-            )}
+            ) : null}
           </div>
         </main>
         

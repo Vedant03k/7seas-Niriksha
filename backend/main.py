@@ -7,6 +7,9 @@ from audio_detector import AudioDeepfakeDetector
 
 app = FastAPI(title="Niriksha Deepfake API")
 
+from routes.image import router as image_router
+app.include_router(image_router)
+
 # CORS - allow all origins for development
 app.add_middleware(
     CORSMiddleware,
