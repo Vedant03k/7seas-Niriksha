@@ -370,9 +370,10 @@ class AudioDeepfakeDetector:
                 all_artifacts.append("No synthetic artifacts detected across all analysis layers")
 
             # Build explanation
+            display_model = os.path.basename(self.model_name.rstrip(os.sep)) if os.path.exists(self.model_name) else self.model_name
             if verdict == "FAKE":
                 explanation = (
-                    f"Multi-layer ensemble analysis ({self.model_name} + spectral/MFCC/pitch) "
+                    f"Multi-layer ensemble analysis ({display_model} + spectral/MFCC/pitch) "
                     f"indicates this audio is AI-generated with {confidence:.1%} confidence."
                 )
             else:
