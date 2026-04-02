@@ -176,11 +176,35 @@ export default function DetectorTab({ acceptType, typeLabel, description }: Dete
               <p className="text-sm text-slate-500 mt-1">Visualizing manipulated pixel regions</p>
             </div>
           ) : (
-            <div className="bg-slate-900 rounded-lg p-6 border border-slate-700 flex flex-col items-center justify-center min-h-[150px] relative overflow-hidden group">
-              <div className="absolute inset-0 bg-gradient-to-tr from-emerald-500/10 to-teal-500/10 mix-blend-overlay"></div>
-              <Activity size={48} className="text-slate-600 mb-3 group-hover:text-emerald-400 transition-colors" />
-              <p className="text-slate-400 font-medium">Frequency / Spectrogram Analysis</p>
-              <p className="text-sm text-slate-500 mt-1">Flagging synthetic vocal signatures</p>
+            <div className="bg-slate-900 rounded-lg p-6 border border-slate-700 space-y-4">
+              <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-400">Multi-Layer Analysis Breakdown</h3>
+              {result.sub_scores ? (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  {[
+                    { label: 'Neural Model', key: 'neural_model', icon: '🧠' },
+                    { label: 'Spectral', key: 'spectral_analysis', icon: '📊' },
+                    { label: 'MFCC', key: 'mfcc_analysis', icon: '🎵' },
+                    { label: 'Pitch/Prosody', key: 'pitch_prosody', icon: '🎤' },
+                  ].map((item) => {
+                    const score = result.sub_scores[item.key] ?? 0;
+                    const pct = (score * 100).toFixed(1);
+                    const isSuspicious = score > 0.5;
+                    return (
+                      <div key={item.key} className={`rounded-lg p-4 border text-center ${isSuspicious ? 'bg-rose-950/20 border-rose-900/40' : 'bg-emerald-950/20 border-emerald-900/40'}`}>
+                        <div className="text-2xl mb-1">{item.icon}</div>
+                        <div className="text-xs uppercase tracking-wider text-slate-400 mb-1">{item.label}</div>
+                        <div className={`text-lg font-bold ${isSuspicious ? 'text-rose-400' : 'text-emerald-400'}`}>{pct}%</div>
+                        <div className="text-xs text-slate-500 mt-1">{isSuspicious ? 'Suspicious' : 'Normal'}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center min-h-[100px] relative overflow-hidden group">
+                  <Activity size={48} className="text-slate-600 mb-3 group-hover:text-emerald-400 transition-colors" />
+                  <p className="text-slate-400 font-medium">Frequency / Spectrogram Analysis</p>
+                </div>
+              )}
             </div>
           )}
         </div>
