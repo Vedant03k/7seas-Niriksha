@@ -42,7 +42,7 @@ function App() {
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id as TabType)}
-                  className={"flex-1 flex min-w-[120px] items-center justify-center space-x-2 py-3 px-4 rounded-lg text-sm font-semibold transition-all duration-200 outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900 ' + (isActive ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shadow-sm' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800 border border-transparent') + '"}
+                  className={"flex-1 flex min-w-[120px] items-center justify-center space-x-2 py-3 px-4 rounded-lg text-sm font-semibold transition-all duration-200 outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900 " + (isActive ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shadow-sm" : "text-slate-400 hover:text-slate-200 hover:bg-slate-800 border border-transparent")}
                   aria-current={isActive ? 'page' : undefined}
                 >
                   <Icon size={18} className={isActive ? 'text-emerald-400' : 'opacity-70'} />

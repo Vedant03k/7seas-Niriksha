@@ -20,22 +20,49 @@ export default function DetectorTab({ acceptType, typeLabel, description }: Dete
     }
   };
 
-  const handleAnalyze = () => {
+  const handleAnalyze = async () => {
     if (!file) return;
     setAnalyzing(true);
     setResult(null);
     
-    // Mock API call to backend
-    setTimeout(() => {
-      setResult({
-        verdict: 'FAKE',
-        confidence: 0.94,
-        media_type: file.type.includes('video') ? 'video' : file.type.includes('audio') ? 'audio' : 'image',
-        artifacts_detected: ['GAN grid pattern anomalies', 'boundary inconsistency detected'],
-        explanation: `Suspicious high-frequency artifacts detected in the ${typeLabel.toLowerCase()} source structure.`
-      });
-      setAnalyzing(false);
-    }, 2000);
+    // If it's an audio file, send it to the real backend
+    if (file.type.includes('audio')) {
+      const formData = new FormData();
+      formData.append('file', file);
+      
+      try {
+        const response = await fetch('/api/analyze/audio', {
+          method: 'POST',
+          body: formData,
+        });
+        
+        const data = await response.json();
+        setResult(data);
+      } catch (error: any) {
+        console.error('Error analyzing audio:', error);
+        setResult({
+          verdict: 'ERROR',
+          confidence: 0,
+          media_type: 'audio',
+          artifacts_detected: ['Connection Error'],
+          explanation: 'Could not connect to the backend. Make sure the FastAPI server is running on port 8000.'
+        });
+      } finally {
+        setAnalyzing(false);
+      }
+    } else {
+      // Mock API call to backend for images and video for now until those endpoints are built
+      setTimeout(() => {
+        setResult({
+          verdict: 'FAKE',
+          confidence: 0.94,
+          media_type: file.type.includes('video') ? 'video' : 'image',
+          artifacts_detected: ['GAN grid pattern anomalies', 'boundary inconsistency detected'],
+          explanation: `Suspicious high-frequency artifacts detected in the ${typeLabel.toLowerCase()} source structure.`
+        });
+        setAnalyzing(false);
+      }, 2000);
+    }
   };
 
   const renderIcon = () => {
@@ -127,7 +154,7 @@ export default function DetectorTab({ acceptType, typeLabel, description }: Dete
             <div className="bg-slate-900/50 rounded-lg p-6 border border-slate-700 text-slate-300">
               <h3 className="text-sm font-semibold uppercase tracking-wider mb-4 text-slate-400">Detected Anomalies</h3>
               <ul className="space-y-2 mb-4">
-                {result.artifacts_detected.map((artifact: string, idx: number) => (
+                {(result.artifacts_detected || []).map((artifact: string, idx: number) => (
                   <li key={idx} className="flex items-center space-x-2">
                      <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
                      <span>{artifact}</span>
