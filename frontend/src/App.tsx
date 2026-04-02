@@ -44,7 +44,8 @@ function App() {
           </h1>
           
           <p className="text-slate-500 text-lg leading-relaxed font-medium">
-            Your advanced AI-powered platform to determine the authenticity of media and maintain digital trust.
+            Detect the fake. Protect the truth.
+            <br />
             Please authenticate to access the forensic tools.
           </p>
 
@@ -104,7 +105,7 @@ function App() {
             </h1>
           </div>
           <p className="text-slate-500 max-w-2xl mx-auto text-lg font-medium">
-            An advanced AI-powered platform to determine the authenticity of media and maintain digital trust.
+            Detect the fake. Protect the truth.
           </p>
         </header>
 
