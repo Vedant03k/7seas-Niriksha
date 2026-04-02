@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Activity, Layers, Image as ImageIcon, FileVideo, Music, LogOut, LogIn, Loader2 } from 'lucide-react';
 import { useAuth0 } from '@auth0/auth0-react';
 import DetectorTab from './components/DetectorTab';
+import nirikshaLogo from './assets/nirikshalogo.png';
 
 type TabType = 'COMBINED' | 'IMAGE' | 'VIDEO' | 'AUDIO';
 
@@ -33,8 +34,8 @@ function App() {
         <div className="bg-slate-800/60 p-10 rounded-2xl border border-slate-700/50 backdrop-blur-sm max-w-lg w-full text-center space-y-8 shadow-2xl relative overflow-hidden">
           <div className="absolute top-0 left-1/2 -translate-x-1/2 w-3/4 h-32 bg-emerald-500/10 blur-[100px] pointer-events-none" />
           
-          <div className="flex items-center justify-center space-x-3 text-emerald-400 mx-auto">
-            <Activity fill="currentColor" className="text-emerald-900 bg-emerald-400 rounded-full p-1" size={56} />
+          <div className="flex items-center justify-center space-x-3 mx-auto">
+            <img src={nirikshaLogo} alt="Niriksha Logo" className="h-28 w-auto object-contain" />
           </div>
           
           <h1 className="text-4xl font-extrabold tracking-tight bg-gradient-to-r from-emerald-400 to-teal-200 bg-clip-text text-transparent">
@@ -88,8 +89,8 @@ function App() {
             </button>
           </div>
 
-          <div className="flex items-center justify-center space-x-3 text-emerald-400">
-            <Activity fill="currentColor" className="text-emerald-900 bg-emerald-400 rounded-full p-1" size={44} />
+          <div className="flex items-center justify-center space-x-4">
+            <img src={nirikshaLogo} alt="Niriksha Logo" className="h-16 w-auto object-contain" />
             <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight bg-gradient-to-r from-emerald-400 to-teal-200 bg-clip-text text-transparent">
               Niriksha Deepfake
             </h1>
