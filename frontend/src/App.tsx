@@ -21,7 +21,7 @@ function App() {
     { id: 'IMAGE', label: 'Image Forensics', icon: ImageIcon, accept: 'image/*', desc: 'Specially tuned Xception/EfficientNet engine designed to detect GAN artifacts and pixel-level inconsistencies in static images.' },
     { id: 'VIDEO', label: 'Video Analysis', icon: FileVideo, accept: 'video/*', desc: 'Analyzes temporal consistency across frames, utilizing lip-sync matching and facial landmark drift checking.' },
     { id: 'AUDIO', label: 'Audio & Voice', icon: Music, accept: 'audio/*', desc: 'Uses Wav2Vec2 and LCNN to extract spectrogram features detecting modern voice cloning (TTS, voice-conversion).' },
-    { id: 'DOCUMENT', label: 'Document Forensics', icon: FileText, accept: 'application/pdf,.pdf', desc: 'Multi-layer PDF forensic analysis: metadata tampering, structural anomalies, image ELA, AI-generated text detection, and digital signature verification.' }
+    { id: 'DOCUMENT', label: 'Document Forensics', icon: FileText, accept: 'application/pdf,.pdf', desc: 'Multi-layer PDF forensic analysis: metadata tampering, structural anomalies, image ELA, AI-generated text detection, and digital signature verification.', disabled: true }
   ];
 
   const currentTabInfo = TABS.find(t => t.id === activeTab);
@@ -127,15 +127,18 @@ function App() {
             {TABS.map((tab) => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
+              const isDisabled = !!(tab as any).disabled;
               
               return (
                 <button
                   key={tab.id}
-                  onClick={() => setActiveTab(tab.id as TabType)}
-                  className={`flex-1 flex min-w-[140px] items-center justify-center space-x-2 py-3.5 px-4 clay-tab ${isActive ? 'active' : 'hover:scale-105'}`}
+                  onClick={() => !isDisabled && setActiveTab(tab.id as TabType)}
+                  disabled={isDisabled}
+                  className={`flex-1 flex min-w-[140px] items-center justify-center space-x-2 py-3.5 px-4 clay-tab ${isDisabled ? 'opacity-40 cursor-not-allowed' : isActive ? 'active' : 'hover:scale-105'}`}
                   aria-current={isActive ? 'page' : undefined}
+                  title={isDisabled ? 'Coming soon' : undefined}
                 >
-                  <Icon size={18} className={isActive ? 'text-white' : 'text-blue-500'} />
+                  <Icon size={18} className={isDisabled ? 'text-slate-400' : isActive ? 'text-white' : 'text-blue-500'} />
                   <span>{tab.label}</span>
                 </button>
               );
