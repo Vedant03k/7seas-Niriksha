@@ -37,7 +37,14 @@ class AudioDeepfakeDetector:
             print(f"Loading HuggingFace model: {self.model_name} ...")
             print("  (Tip: Run 'python train_model.py' to fine-tune a local model for better accuracy)")
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # Try CUDA but fall back to CPU if GPU has issues
+        self.device = torch.device("cpu")
+        if torch.cuda.is_available():
+            try:
+                torch.zeros(1, device="cuda")  # quick GPU sanity check
+                self.device = torch.device("cuda")
+            except Exception as e:
+                print(f"CUDA available but unusable ({e}), falling back to CPU")
         print(f"Using device: {self.device}")
         self.processor = Wav2Vec2FeatureExtractor.from_pretrained(self.model_name)
         self.model = Wav2Vec2ForSequenceClassification.from_pretrained(self.model_name)
