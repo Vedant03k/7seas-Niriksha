@@ -21,10 +21,12 @@ class AudioDeepfakeDetector:
     """
 
     # --- Ensemble weights (neural model is dominant, stats are supplementary) ---
-    W_NEURAL  = 0.45
-    W_SPECTRAL = 0.20
-    W_MFCC    = 0.15
-    W_PITCH   = 0.20
+    W_NEURAL  = 0.35
+    W_SPECTRAL = 0.12
+    W_SPECTRAL_CONSISTENCY = 0.10
+    W_MFCC    = 0.13
+    W_PITCH   = 0.15
+    W_SILENCE = 0.15
 
     def __init__(self):
         # Prefer locally fine-tuned model, fall back to HuggingFace remote model
@@ -165,8 +167,73 @@ class AudioDeepfakeDetector:
             artifacts.append(f"Unusual high-frequency energy spike ({hf_ratio:.4f}) — possible synthesis artifact")
         scores.append(hf_score)
 
-        combined = float(np.mean(scores)) if scores else 0.0
+        # Use weighted combination: don't let 0s completely dilute strong signals
+        if scores:
+            combined = float(0.5 * np.mean(scores) + 0.5 * np.max(scores))
+        else:
+            combined = 0.0
         return min(combined, 1.0), artifacts
+
+    # ── Layer 2b: Spectral temporal consistency ───────────────────────────
+
+    @staticmethod
+    def _spectral_consistency_score(audio: np.ndarray, sr: int = 16000):
+        """
+        Modern TTS (ElevenLabs, XTTS) produces unusually consistent
+        frame-to-frame spectra. Measure cosine similarity between consecutive
+        frames — real speech has more variation.
+        """
+        artifacts = []
+        frame_len = int(0.025 * sr)
+        hop = int(0.010 * sr)
+        n_fft = max(512, frame_len)
+
+        prev_spectrum = None
+        cosine_sims = []
+
+        for start in range(0, len(audio) - frame_len, hop):
+            frame = audio[start:start + frame_len]
+            windowed = frame * np.hanning(len(frame))
+            spectrum = np.abs(np.fft.rfft(windowed, n=n_fft))
+            norm = np.linalg.norm(spectrum)
+            if norm < 1e-12:
+                prev_spectrum = None
+                continue
+            spectrum_normed = spectrum / norm
+
+            if prev_spectrum is not None:
+                cos_sim = float(np.dot(prev_spectrum, spectrum_normed))
+                cosine_sims.append(cos_sim)
+            prev_spectrum = spectrum_normed
+
+        if len(cosine_sims) < 10:
+            return 0.0, artifacts
+
+        sim_arr = np.array(cosine_sims)
+        mean_sim = float(np.mean(sim_arr))
+        std_sim = float(np.std(sim_arr))
+
+        score = 0.0
+        # TTS tends to have high mean cosine similarity
+        if mean_sim > 0.93:
+            score += 0.5
+            artifacts.append(f"Very high spectral frame consistency (cos={mean_sim:.4f}) — typical of neural TTS")
+        elif mean_sim > 0.88:
+            score += 0.3
+            artifacts.append(f"High spectral frame consistency (cos={mean_sim:.4f}) — possible neural TTS artifact")
+        elif mean_sim > 0.85:
+            score += 0.15
+            artifacts.append(f"Elevated spectral frame consistency (cos={mean_sim:.4f}) — above natural speech norms")
+
+        # TTS also has low std in frame similarity (very uniform)
+        if std_sim < 0.05:
+            score += 0.3
+            artifacts.append(f"Low spectral variation (std={std_sim:.4f}) — unnaturally uniform frame-to-frame transitions")
+        elif std_sim < 0.10:
+            score += 0.15
+            artifacts.append(f"Moderately low spectral variation (std={std_sim:.4f}) — less variation than typical speech")
+
+        return min(score, 1.0), artifacts
 
     # ── Layer 3: MFCC analysis ────────────────────────────────────────────
 
@@ -229,9 +296,15 @@ class AudioDeepfakeDetector:
 
         # AI voices tend to have lower delta variance (smoother transitions)
         mean_delta_std = float(np.mean(delta_std[1:]))  # skip c0
-        if mean_delta_std < 1.5:
-            scores.append(0.5)
+        if mean_delta_std < 0.8:
+            scores.append(0.8)
+            artifacts.append(f"Very low MFCC delta variance ({mean_delta_std:.2f}) — strongly synthetic cepstral pattern")
+        elif mean_delta_std < 1.2:
+            scores.append(0.6)
             artifacts.append(f"Low MFCC delta variance ({mean_delta_std:.2f}) — overly smooth cepstral transitions")
+        elif mean_delta_std < 1.8:
+            scores.append(0.4)
+            artifacts.append(f"Below-average MFCC delta variance ({mean_delta_std:.2f}) — smoother than typical speech")
         else:
             scores.append(0.0)
 
@@ -245,7 +318,11 @@ class AudioDeepfakeDetector:
         else:
             scores.append(0.0)
 
-        combined = float(np.mean(scores)) if scores else 0.0
+        # Use weighted combination: don't let 0s dilute strong signals
+        if scores:
+            combined = float(0.5 * np.mean(scores) + 0.5 * np.max(scores))
+        else:
+            combined = 0.0
         return min(combined, 1.0), artifacts
 
     # ── Layer 4: Pitch / prosody analysis ─────────────────────────────────
@@ -337,6 +414,83 @@ class AudioDeepfakeDetector:
         combined = float(np.mean(scores)) if scores else 0.0
         return min(combined, 1.0), artifacts
 
+    # ── Layer 5: Silence / pause pattern analysis ──────────────────────────
+
+    @staticmethod
+    def _silence_score(audio: np.ndarray, sr: int = 16000):
+        """
+        Analyse silence/pause segments. TTS models produce unnaturally clean
+        silences (near-digital-zero energy), while real recordings always
+        have ambient room noise, mic hiss, and a non-zero noise floor.
+        """
+        artifacts = []
+        frame_len = int(0.020 * sr)  # 20 ms
+        hop = int(0.010 * sr)
+
+        energies = []
+        for start in range(0, len(audio) - frame_len, hop):
+            frame = audio[start:start + frame_len]
+            energies.append(float(np.sum(frame ** 2) / len(frame)))
+
+        if len(energies) < 20:
+            return 0.0, artifacts
+
+        energies = np.array(energies)
+
+        # Identify silent frames (bottom 15% by energy)
+        threshold = np.percentile(energies, 15)
+        silent_energies = energies[energies < threshold]
+
+        if len(silent_energies) < 5:
+            return 0.0, artifacts
+
+        scores = []
+        mean_silent = float(np.mean(silent_energies))
+        min_energy = float(np.min(energies))
+
+        # Near-zero frame count (< 1e-8 energy = essentially digital silence)
+        near_zero = int(np.sum(energies < 1e-8))
+        near_zero_pct = near_zero / len(energies)
+
+        # Feature 1: Very low silent frame energy (TTS has ~1e-7, real has ~1e-4)
+        if mean_silent < 1e-6:
+            scores.append(0.7)
+            artifacts.append(f"Extremely low silence energy ({mean_silent:.2e}) — digital-quality silence typical of TTS")
+        elif mean_silent < 1e-5:
+            scores.append(0.4)
+            artifacts.append(f"Very low silence energy ({mean_silent:.2e}) — cleaner than typical recorded speech")
+        else:
+            scores.append(0.0)
+
+        # Feature 2: Near-zero energy frames (real speech never has true zero)
+        if near_zero > 0:
+            scores.append(0.3)
+            artifacts.append(f"Digital-zero silence frames detected ({near_zero} frames, {near_zero_pct:.1%}) — not found in natural recordings")
+        else:
+            scores.append(0.0)
+
+        # Feature 3: Noise floor gap — ratio between silent and voiced energy
+        voiced_energies = energies[energies >= threshold]
+        if len(voiced_energies) > 0:
+            voiced_mean = float(np.mean(voiced_energies))
+            if voiced_mean > 0:
+                silence_ratio = mean_silent / voiced_mean
+                if silence_ratio < 1e-4:
+                    scores.append(0.5)
+                    artifacts.append(f"Extreme silence-to-voice ratio ({silence_ratio:.2e}) — unnaturally clean silence")
+                else:
+                    scores.append(0.0)
+            else:
+                scores.append(0.0)
+        else:
+            scores.append(0.0)
+
+        if scores:
+            combined = float(0.5 * np.mean(scores) + 0.5 * np.max(scores))
+        else:
+            combined = 0.0
+        return min(combined, 1.0), artifacts
+
     # ── Ensemble & Final Verdict ──────────────────────────────────────────
 
     def analyze_audio(self, file_path: str):
@@ -350,31 +504,52 @@ class AudioDeepfakeDetector:
             # Layer 2: Spectral analysis
             spectral_fake, spectral_artifacts = self._spectral_score(audio, sr)
 
+            # Layer 2b: Spectral temporal consistency (catches modern TTS)
+            spectral_cons_fake, spectral_cons_artifacts = self._spectral_consistency_score(audio, sr)
+
             # Layer 3: MFCC analysis
             mfcc_fake, mfcc_artifacts = self._mfcc_score(audio, sr)
 
             # Layer 4: Pitch/prosody analysis
             pitch_fake, pitch_artifacts = self._pitch_score(audio, sr)
 
+            # Layer 5: Silence/pause pattern analysis
+            silence_fake, silence_artifacts = self._silence_score(audio, sr)
+
             # Weighted ensemble
             ensemble_fake = (
                 self.W_NEURAL  * neural_fake +
                 self.W_SPECTRAL * spectral_fake +
+                self.W_SPECTRAL_CONSISTENCY * spectral_cons_fake +
                 self.W_MFCC    * mfcc_fake +
-                self.W_PITCH   * pitch_fake
+                self.W_PITCH   * pitch_fake +
+                self.W_SILENCE * silence_fake
             )
 
-            # Anomaly-based boost: if 2+ non-neural layers detect artifacts,
-            # boost the fake score to account for modern TTS that fools neural models
-            artifact_layers = sum([
-                1 if spectral_fake > 0.2 else 0,
-                1 if mfcc_fake > 0.2 else 0,
-                1 if pitch_fake > 0.2 else 0,
-            ])
-            if artifact_layers >= 2 and ensemble_fake < 0.5:
-                non_neural_avg = (spectral_fake + mfcc_fake + pitch_fake) / 3.0
-                boost = non_neural_avg * 0.3
-                ensemble_fake = min(ensemble_fake + boost, 0.95)
+            # Anomaly-based boost: non-neural layers detect artifacts that
+            # modern TTS (ElevenLabs, XTTS) produce despite fooling neural models
+            non_neural_scores = [spectral_fake, spectral_cons_fake, mfcc_fake, pitch_fake, silence_fake]
+            artifact_layers = sum(1 for s in non_neural_scores if s > 0.15)
+            strong_artifact_layers = sum(1 for s in non_neural_scores if s > 0.3)
+
+            if artifact_layers >= 3 and strong_artifact_layers >= 2 and ensemble_fake < 0.5:
+                # Strong multi-layer evidence — very likely synthetic
+                non_neural_avg = np.mean(non_neural_scores)
+                non_neural_max = max(non_neural_scores)
+                boost = (non_neural_avg + non_neural_max) * 0.3
+                ensemble_fake = min(ensemble_fake + boost, 0.90)
+            elif artifact_layers >= 2 and strong_artifact_layers >= 1 and ensemble_fake < 0.5:
+                non_neural_avg = np.mean(non_neural_scores)
+                boost = non_neural_avg * 0.35
+                ensemble_fake = min(ensemble_fake + boost, 0.85)
+
+            # Neural-statistical disagreement: if neural says real (<0.2) but
+            # statistical evidence says fake, apply skepticism
+            non_neural_avg = np.mean(non_neural_scores)
+            non_neural_max = max(non_neural_scores)
+            if neural_fake < 0.2 and non_neural_avg > 0.15 and strong_artifact_layers >= 1:
+                skepticism_boost = (non_neural_avg + non_neural_max) * 0.2
+                ensemble_fake = min(ensemble_fake + skepticism_boost, 0.85)
 
             # Strong neural signal override: if neural model is very confident
             # about fake (>0.8), trust it — use the neural score directly as floor
@@ -391,8 +566,10 @@ class AudioDeepfakeDetector:
             if neural_fake > 0.5:
                 all_artifacts.append(f"Neural model detected synthetic patterns (score: {neural_fake:.1%})")
             all_artifacts.extend(spectral_artifacts)
+            all_artifacts.extend(spectral_cons_artifacts)
             all_artifacts.extend(mfcc_artifacts)
             all_artifacts.extend(pitch_artifacts)
+            all_artifacts.extend(silence_artifacts)
 
             # If REAL and no artifacts, add a reassurance
             if verdict == "REAL" and not all_artifacts:
@@ -421,8 +598,10 @@ class AudioDeepfakeDetector:
                 "sub_scores": {
                     "neural_model": round(neural_fake, 4),
                     "spectral_analysis": round(spectral_fake, 4),
+                    "spectral_consistency": round(spectral_cons_fake, 4),
                     "mfcc_analysis": round(mfcc_fake, 4),
                     "pitch_prosody": round(pitch_fake, 4),
+                    "silence_pattern": round(silence_fake, 4),
                 },
             }
 

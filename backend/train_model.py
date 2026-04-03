@@ -132,9 +132,8 @@ class AudioDataset(Dataset):
         return {"input_values": input_values, "labels": torch.tensor(label, dtype=torch.long)}
 
 
-# ────────────────────────────────────────────────────────────────────────
 # Data collator (pad to same length within batch)
-# ────────────────────────────────────────────────────────────────────────
+
 
 class DataCollator:
     def __init__(self, processor):
@@ -268,9 +267,7 @@ def download_hf_dataset(data_dir: str, max_per_class: int = 0):
     print("[Dataset] Download complete!")
 
 
-# ────────────────────────────────────────────────────────────────────────
-# Main training logic
-# ────────────────────────────────────────────────────────────────────────
+#main training function with argparse for options
 
 def main():
     parser = argparse.ArgumentParser(description="Fine-tune audio deepfake detection model")
