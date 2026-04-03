@@ -218,10 +218,10 @@ class AudioDeepfakeDetector:
         if mean_sim > 0.93:
             score += 0.5
             artifacts.append(f"Very high spectral frame consistency (cos={mean_sim:.4f}) — typical of neural TTS")
-        elif mean_sim > 0.88:
+        elif mean_sim > 0.90:
             score += 0.3
             artifacts.append(f"High spectral frame consistency (cos={mean_sim:.4f}) — possible neural TTS artifact")
-        elif mean_sim > 0.85:
+        elif mean_sim > 0.87:
             score += 0.15
             artifacts.append(f"Elevated spectral frame consistency (cos={mean_sim:.4f}) — above natural speech norms")
 
@@ -296,14 +296,14 @@ class AudioDeepfakeDetector:
 
         # AI voices tend to have lower delta variance (smoother transitions)
         mean_delta_std = float(np.mean(delta_std[1:]))  # skip c0
-        if mean_delta_std < 0.8:
+        if mean_delta_std < 0.7:
             scores.append(0.8)
             artifacts.append(f"Very low MFCC delta variance ({mean_delta_std:.2f}) — strongly synthetic cepstral pattern")
-        elif mean_delta_std < 1.2:
+        elif mean_delta_std < 1.0:
             scores.append(0.6)
             artifacts.append(f"Low MFCC delta variance ({mean_delta_std:.2f}) — overly smooth cepstral transitions")
-        elif mean_delta_std < 1.8:
-            scores.append(0.4)
+        elif mean_delta_std < 1.4:
+            scores.append(0.35)
             artifacts.append(f"Below-average MFCC delta variance ({mean_delta_std:.2f}) — smoother than typical speech")
         else:
             scores.append(0.0)
@@ -538,18 +538,23 @@ class AudioDeepfakeDetector:
                 non_neural_max = max(non_neural_scores)
                 boost = (non_neural_avg + non_neural_max) * 0.3
                 ensemble_fake = min(ensemble_fake + boost, 0.90)
-            elif artifact_layers >= 2 and strong_artifact_layers >= 1 and ensemble_fake < 0.5:
+            elif artifact_layers >= 3 and strong_artifact_layers >= 1 and ensemble_fake < 0.5:
                 non_neural_avg = np.mean(non_neural_scores)
-                boost = non_neural_avg * 0.35
+                boost = non_neural_avg * 0.25
                 ensemble_fake = min(ensemble_fake + boost, 0.85)
 
             # Neural-statistical disagreement: if neural says real (<0.2) but
             # statistical evidence says fake, apply skepticism
             non_neural_avg = np.mean(non_neural_scores)
             non_neural_max = max(non_neural_scores)
-            if neural_fake < 0.2 and non_neural_avg > 0.15 and strong_artifact_layers >= 1:
+            if neural_fake < 0.2 and non_neural_avg > 0.25 and strong_artifact_layers >= 2:
                 skepticism_boost = (non_neural_avg + non_neural_max) * 0.2
                 ensemble_fake = min(ensemble_fake + skepticism_boost, 0.85)
+
+            # Pitch dampener: if pitch analysis confirms natural prosody (jitter/shimmer
+            # are normal), this is strong evidence of real speech — reduce ensemble
+            if pitch_fake == 0.0 and ensemble_fake > 0.4 and neural_fake < 0.3:
+                ensemble_fake *= 0.75
 
             # Strong neural signal override: if neural model is very confident
             # about fake (>0.8), trust it — use the neural score directly as floor
