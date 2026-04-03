@@ -35,7 +35,7 @@ class VideoDeepfakeModel(nn.Module):
 
 # Global inference settings
 NUM_FRAMES_PER_SEQ = 15
-MAX_FRAMES_TO_EXTRACT = 60 # Analyze up to 60 frames (4 distinct sequence chunks) across the whole video
+MAX_CHUNKS_TO_ANALYZE = 40 # Analyze up to 40 continuous video chunks
 FACE_SIZE = 299
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"Loading inference on device: {DEVICE}")
@@ -71,86 +71,92 @@ def get_model():
 
 def analyze_video(video_path: str):
     """
-    Analyzes the WHOLE video by extracting numerous frames, splitting them into sequences of 15,
-    running each chunk through the Video Deepfake model, and flagging it if ANY chunk contains a deepfake anomaly.
+    Analyzes the WHOLE video by extracting numerous continuous sequences of frames.
+    For longer videos, it jumps ahead to grab multiple 15-frame continuous blocks, 
+    running each chunk through the Video Deepfake model, flagging it if ANY block
+    contains a deepfake anomaly.
     """
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         raise ValueError("Could not open video file.")
+        
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    if fps <= 0:
+        fps = 30.0
         
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     if total_frames < NUM_FRAMES_PER_SEQ:
         cap.release()
         raise ValueError(f"Video is too short. Needs at least {NUM_FRAMES_PER_SEQ} frames.")
 
-    # We want to extract up to MAX_FRAMES_TO_EXTRACT evenly from the entire video duration
-    frames_to_extract = min(total_frames, MAX_FRAMES_TO_EXTRACT)
-    frame_indices = np.linspace(0, total_frames - 1, frames_to_extract, dtype=int)
+    # Goal: We want to sample a continuous 15-frame block across the timeline.
+    # E.g., sample a block once every 1 second
+    stride_frames = int(fps) 
     
-    faces = []
-    cap_idx = 0
+    # Calculate starting frame index for every chunk we want to pull
+    start_frames = list(range(0, total_frames - NUM_FRAMES_PER_SEQ, stride_frames))
     
-    while cap.isOpened() and len(faces) < frames_to_extract:
-        ret, frame = cap.read()
-        if not ret:
-            break
-            
-        if cap_idx in frame_indices:
+    # Prevent extracting too many chunks on very long movies (cap at 40 chunks / ~40 seconds distributed)
+    if len(start_frames) > MAX_CHUNKS_TO_ANALYZE:
+        indices = np.linspace(0, len(start_frames) - 1, MAX_CHUNKS_TO_ANALYZE, dtype=int)
+        start_frames = [start_frames[i] for i in indices]
+        
+    chunked_sequences = []
+    
+    for start_f in start_frames:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, start_f)
+        
+        segment_faces = []
+        last_good_face = None
+        
+        for _ in range(NUM_FRAMES_PER_SEQ):
+            ret, frame = cap.read()
+            if not ret:
+                break
+                
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             img = Image.fromarray(frame_rgb)
             
-            # Detect face
             try:
+                # Detect face
                 face = mtcnn(img)
                 if face is not None:
                     face_array = face.permute(1, 2, 0).byte().cpu().numpy()
                     face_img = Image.fromarray(face_array)
                     face_img = face_img.resize((FACE_SIZE, FACE_SIZE))
-                    faces.append(transform(face_img))
+                    last_good_face = transform(face_img)
             except Exception:
-                pass # Continue if no face found or MTCNN crashes
+                pass # Missing face, we'll gracefully fallback
                 
-        cap_idx += 1
+            # If MTCNN drops a frame or person blinks, use the last known face to maintain temporal continuity
+            if last_good_face is not None:
+                segment_faces.append(last_good_face)
+                
+        # Only keep full 15-frame continuous segments
+        if len(segment_faces) == NUM_FRAMES_PER_SEQ:
+            chunked_sequences.append(torch.stack(segment_faces))
+            
     cap.release()
     
-    if len(faces) == 0:
-        raise ValueError("No faces were detected in the video.")
+    if len(chunked_sequences) == 0:
+        raise ValueError("No continuous face sequences could be detected in the video.")
         
-    # We must have at least 1 full sequence (15 frames)
-    while len(faces) < NUM_FRAMES_PER_SEQ:
-        faces.append(faces[-1]) # Pad with the last successful face
-        
-    # Split the gathered faces into OVERLAPPING chunks of `NUM_FRAMES_PER_SEQ`
-    # This sliding window approach catches deepfakes that straddle the chunk boundaries.
-    chunked_sequences = []
-    stride = 5  # Overlap chunks by 10 frames
-    
-    for i in range(0, len(faces) - NUM_FRAMES_PER_SEQ + 1, stride):
-        chunk = faces[i : i + NUM_FRAMES_PER_SEQ]
-        if len(chunk) == NUM_FRAMES_PER_SEQ:
-            chunked_sequences.append(torch.stack(chunk))
-            
-    # Include the very last sequence if it was missed
-    if len(faces) >= NUM_FRAMES_PER_SEQ:
-        chunked_sequences.append(torch.stack(faces[-NUM_FRAMES_PER_SEQ:]))
-    else:
-        chunked_sequences.append(torch.stack(faces)) # This path is already handled above by padding
-        
-    # Run Inference on all sequence chunks in a batch: Shape (Num_Chunks, 15, 3, 299, 299)
+    # Run Inference on all continuous chunks in a single GPU batch
+    # Shape: (Num_Chunks, 15, 3, 299, 299)
     tensor_batch = torch.stack(chunked_sequences).to(DEVICE)
     
     model = get_model()
     with torch.no_grad():
         with torch.amp.autocast(device_type=DEVICE.type if DEVICE.type == 'cuda' else 'cpu', enabled=DEVICE.type=='cuda'):
-            raw_logits = model(tensor_batch) # Returns probability for EACH chunk
+            raw_logits = model(tensor_batch) # Returns probability for EACH sequence block
             fake_probs = torch.sigmoid(raw_logits).cpu().numpy().flatten()
             
     # Whole-Video Analysis Strategy: 
-    # If any specific time-chunk in the video spikes as very highly FAKE, we flag the whole video. 
+    # If any specific continuous 15-frame block spikes as FAKE, we flag the whole video. 
     # This catches short AI face-swaps in the middle of otherwise real videos!
     # Deepfakes from different domains (e.g. YouTube shorts) can have lower absolute scores
-    # than the Celeb-DF dataset. We lower the threshold to 0.35 to increase sensitivity.
-    DETECTION_THRESHOLD = 0.35
+    # than the Celeb-DF dataset. We use a threshold of 0.5 as standard.
+    DETECTION_THRESHOLD = 0.50
     
     max_fake_prob = float(np.max(fake_probs))
     avg_fake_prob = float(np.mean(fake_probs))

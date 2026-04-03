@@ -195,7 +195,7 @@ export default function DetectorTab({ acceptType, typeLabel, description, credit
             <h2 className="text-3xl font-extrabold flex items-center space-x-2 text-slate-800">
               <span>Analysis Results</span>
             </h2>
-            {result.verdict === 'FAKE' && (
+            {result.verdict !== 'ERROR' && (
               <button 
                 onClick={handleDownloadReport}
                 className="clay-btn bg-slate-800 text-white hover:bg-slate-700 px-5 py-2.5 rounded-xl flex items-center space-x-2 font-bold transition-all shadow-[4px_4px_8px_rgba(15,23,42,0.3),inset_-2px_-2px_4px_rgba(15,23,42,0.5),inset_2px_2px_4px_rgba(148,163,184,0.4)]"

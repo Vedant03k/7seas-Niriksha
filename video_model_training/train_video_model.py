@@ -19,10 +19,10 @@ ACCUMULATION_STEPS = 8     # Effectively trains at a batch size of 16 (2 * 8)
 NUM_WORKERS = 2
 
 # Training Strategy
-EPOCHS_STAGE_1 = 2         # Train LSTM and Classification Head initially
-EPOCHS_STAGE_2 = 3         # Unfreeze top layer of Backbone and fine-tune everything
-LEARNING_RATE_1 = 1e-3     # Higher learning rate since Backbone is frozen
-LEARNING_RATE_2 = 1e-5     # Very low learning rate so we don't break Backbone weights
+EPOCHS_STAGE_1 = 3         # Train LSTM and Classification Head initially
+EPOCHS_STAGE_2 = 5         # Unfreeze top layer of Backbone and fine-tune everything
+LEARNING_RATE_1 = 5e-4     # Slightly lower for stability
+LEARNING_RATE_2 = 5e-6     # Very low learning rate so we don't break Backbone weights
 # =================================================
 
 def run_training_loop(model, train_loader, val_loader, criterion, optimizer, scaler, device, epochs, best_val_loss, stage_name):
