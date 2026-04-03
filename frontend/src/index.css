@@ -1,0 +1,33 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    @apply bg-[#e5efff] text-slate-800 font-sans antialiased;
+  }
+}
+
+@layer utilities {
+  .clay-card {
+    @apply bg-white/90 backdrop-blur-md rounded-[2rem] border-0;
+    box-shadow: 20px 20px 40px rgba(170, 190, 230, 0.5),
+                inset -8px -8px 16px rgba(170, 190, 230, 0.3),
+                inset 8px 8px 16px rgba(255, 255, 255, 0.9);
+  }
+  .clay-btn {
+    @apply bg-blue-500 text-white rounded-[1.5rem] font-bold transition-all active:scale-95 border-0;
+    box-shadow: 8px 8px 16px rgba(59, 130, 246, 0.3),
+                inset -4px -4px 8px rgba(37, 99, 235, 0.5),
+                inset 4px 4px 8px rgba(147, 197, 253, 0.8);
+  }
+  .clay-tab {
+    @apply bg-white text-slate-600 rounded-[1.5rem] font-bold transition-all active:scale-95 border-0;
+    box-shadow: 6px 6px 12px rgba(170, 190, 230, 0.4),
+                inset -3px -3px 6px rgba(170, 190, 230, 0.2),
+                inset 3px 3px 6px rgba(255, 255, 255, 0.9);
+  }
+  .clay-tab.active {
+    @apply bg-blue-400 text-white;
+    box-shadow: inset 4px 4px 8px rgba(37, 99, 235, 0.4),
+                inset -4px -4px 8px rgba(147, 197, 253, 0.6);
+  }
+}
