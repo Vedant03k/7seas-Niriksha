@@ -335,7 +335,9 @@ class ImageDeepfakeDetector:
             elif ensemble_score >= 0.35:
                 verdict = "UNCERTAIN"
             else:
-                verdict = "REAL"            artifacts = []
+                verdict = "REAL"
+            
+            artifacts = []
             if fft_result["has_gan_grid"]:
                 artifacts.append("GAN grid pattern (frequency domain)")
             if fft_result["fft_anomaly_score"] > 0.5:

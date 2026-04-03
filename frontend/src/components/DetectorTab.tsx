@@ -75,30 +75,53 @@ export default function DetectorTab({ acceptType, typeLabel, description, credit
 
   const handleDownloadReport = async () => {
     if (!result) return;
+    setGeneratingReport(true);
     try {
-      const resp = await fetch('http://127.0.0.1:8000/generate/report', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          verdict: result.verdict,
-          confidence: result.confidence,
-          media_type: result.media_type,
-          artifacts_detected: result.artifacts_detected || [],
-          explanation: result.explanation || ''
-        })
-      });
-      if (!resp.ok) throw new Error('Failed to generate report');
-      
-      const blob = await resp.blob();
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', `Niriksha_Report_${Date.now()}.pdf`);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
+      if (result.media_type === 'audio') {
+        const payload = { ...result, filename: file?.name || 'unknown' };
+        const response = await fetch('http://127.0.0.1:8000/analyze/audio/report', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ result: payload }),
+        });
+        if (!response.ok) throw new Error('Failed to generate report');
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Niriksha_Audio_Report_${(file?.name || 'audio').replace(/\.[^.]+$/, '')}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      } else {
+        const resp = await fetch('http://127.0.0.1:8000/generate/report', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            verdict: result.verdict,
+            confidence: result.confidence,
+            media_type: result.media_type,
+            artifacts_detected: result.artifacts_detected || [],
+            explanation: result.explanation || ''
+          })
+        });
+        if (!resp.ok) throw new Error('Failed to generate report');
+        
+        const blob = await resp.blob();
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', `Niriksha_Report_${Date.now()}.pdf`);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.URL.revokeObjectURL(url);
+      }
     } catch (err) {
-      console.error('Download report error:', err);
+      console.error('Report generation failed:', err);
+    } finally {
+      setGeneratingReport(false);
     }
   };
 
@@ -109,33 +132,6 @@ export default function DetectorTab({ acceptType, typeLabel, description, credit
       return <ImageIcon size={48} className="text-blue-500 drop-shadow-md" />;
     }
     return <UploadCloud size={48} className="text-blue-400 drop-shadow-sm" />;
-  };
-
-  const handleDownloadReport = async () => {
-    if (!result || result.media_type !== 'audio') return;
-    setGeneratingReport(true);
-    try {
-      const payload = { ...result, filename: file?.name || 'unknown' };
-      const response = await fetch('/api/analyze/audio/report', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ result: payload }),
-      });
-      if (!response.ok) throw new Error('Failed to generate report');
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `Niriksha_Audio_Report_${(file?.name || 'audio').replace(/\.[^.]+$/, '')}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      window.URL.revokeObjectURL(url);
-    } catch (err) {
-      console.error('Report generation failed:', err);
-    } finally {
-      setGeneratingReport(false);
-    }
   };
 
   return (
