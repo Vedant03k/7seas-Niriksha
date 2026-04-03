@@ -530,36 +530,56 @@ class AudioDeepfakeDetector:
             # modern TTS (ElevenLabs, XTTS) produce despite fooling neural models
             non_neural_scores = [spectral_fake, spectral_cons_fake, mfcc_fake, pitch_fake, silence_fake]
             artifact_layers = sum(1 for s in non_neural_scores if s > 0.15)
-            strong_artifact_layers = sum(1 for s in non_neural_scores if s > 0.3)
+            strong_artifact_layers = sum(1 for s in non_neural_scores if s >= 0.28)
 
             if artifact_layers >= 3 and strong_artifact_layers >= 2 and ensemble_fake < 0.5:
                 # Strong multi-layer evidence — very likely synthetic
                 non_neural_avg = np.mean(non_neural_scores)
                 non_neural_max = max(non_neural_scores)
-                boost = (non_neural_avg + non_neural_max) * 0.3
+                boost = (non_neural_avg + non_neural_max) * 0.35
                 ensemble_fake = min(ensemble_fake + boost, 0.90)
-            elif artifact_layers >= 3 and strong_artifact_layers >= 1 and ensemble_fake < 0.5:
+            elif artifact_layers >= 2 and strong_artifact_layers >= 1 and ensemble_fake < 0.5:
                 non_neural_avg = np.mean(non_neural_scores)
-                boost = non_neural_avg * 0.25
+                boost = non_neural_avg * 0.3
                 ensemble_fake = min(ensemble_fake + boost, 0.85)
 
             # Neural-statistical disagreement: if neural says real (<0.2) but
             # statistical evidence says fake, apply skepticism
             non_neural_avg = np.mean(non_neural_scores)
             non_neural_max = max(non_neural_scores)
-            if neural_fake < 0.2 and non_neural_avg > 0.25 and strong_artifact_layers >= 2:
-                skepticism_boost = (non_neural_avg + non_neural_max) * 0.2
+            if neural_fake < 0.2 and non_neural_avg > 0.15 and strong_artifact_layers >= 1:
+                skepticism_boost = (non_neural_avg + non_neural_max) * 0.25
                 ensemble_fake = min(ensemble_fake + skepticism_boost, 0.85)
 
-            # Pitch dampener: if pitch analysis confirms natural prosody (jitter/shimmer
-            # are normal), this is strong evidence of real speech — reduce ensemble
+            # Pitch dampener: only apply when statistical evidence is weak
+            # (avoids suppressing legitimate fake signals from ElevenLabs v2 etc.)
             if pitch_fake == 0.0 and ensemble_fake > 0.4 and neural_fake < 0.3:
-                ensemble_fake *= 0.75
+                if artifact_layers <= 1 and strong_artifact_layers == 0:
+                    ensemble_fake *= 0.75
 
             # Strong neural signal override: if neural model is very confident
             # about fake (>0.8), trust it — use the neural score directly as floor
             if neural_fake > 0.8:
                 ensemble_fake = max(ensemble_fake, neural_fake * 0.85)
+
+            # Codec-aware correction: m4a/AAC/OGG codecs introduce spectral
+            # artifacts that the neural model (trained on WAV/MP3) mistakes for
+            # synthesis patterns, producing ~95-97% fake scores on real recordings.
+            # When the neural score is very high but statistical analysis layers
+            # do NOT corroborate (analysis_avg < 0.4) and pitch is clean,
+            # recalculate with statistical evidence as the neural proxy.
+            file_ext = os.path.splitext(file_path)[1].lower()
+            if file_ext in ('.m4a', '.aac', '.ogg', '.opus') and neural_fake > 0.8:
+                analysis_avg = np.mean([spectral_fake, spectral_cons_fake, mfcc_fake])
+                if pitch_fake < 0.1 and analysis_avg < 0.4:
+                    ensemble_fake = (
+                        self.W_NEURAL * analysis_avg +
+                        self.W_SPECTRAL * spectral_fake +
+                        self.W_SPECTRAL_CONSISTENCY * spectral_cons_fake +
+                        self.W_MFCC * mfcc_fake +
+                        self.W_PITCH * pitch_fake +
+                        self.W_SILENCE * silence_fake
+                    )
 
             ensemble_real = 1.0 - ensemble_fake
 
