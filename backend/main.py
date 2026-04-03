@@ -11,6 +11,8 @@ import textwrap
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
+from reportlab.lib.utils import ImageReader
+import base64
 from audio_detector import AudioDeepfakeDetector
 
 app = FastAPI(title="Niriksha Deepfake API")
@@ -97,7 +99,7 @@ async def analyze_video_endpoint(file: UploadFile = File(...)):
         return result
 
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        print('VALUE ERROR DETAILS:', e); import traceback; traceback.print_exc(); raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Inference failed: {str(e)}")
     finally:
@@ -111,6 +113,7 @@ class ReportRequest(BaseModel):
     media_type: str
     artifacts_detected: list[str]
     explanation: str
+    heatmaps: list[str] = []
 
 @app.post("/generate/report")
 async def generate_report_endpoint(request: ReportRequest):
@@ -122,7 +125,10 @@ async def generate_report_endpoint(request: ReportRequest):
         # Create PDF using ReportLab
         c = canvas.Canvas(pdf_path, pagesize=letter)
         width, height = letter
-        
+
+        from watermark import add_watermark
+        add_watermark(c, width, height)
+
         # Header
         c.setFont("Helvetica-Bold", 24)
         c.drawString(50, height - 50, "Niriksha AI - Deepfake Analysis Report")
@@ -177,10 +183,51 @@ async def generate_report_endpoint(request: ReportRequest):
                 line = word + " "
         c.drawString(70, y_pos, line)
         
-        # Footer
-        c.setFont("Helvetica-Oblique", 10)
-        c.setFillColor(colors.gray)
-        c.drawString(50, 30, "This is an automatically generated AI report by Niriksha AI. Use for supplementary intelligence.")
+        if request.heatmaps:
+            y_pos -= 30
+            if y_pos < 200:
+                c.showPage()
+                add_watermark(c, width, height)
+                y_pos = height - 50
+
+            c.setFont("Helvetica-Bold", 14)
+            c.drawString(50, y_pos, "5. Forensic Spatial Heatmaps (Grad-CAM)")  
+            y_pos -= 15
+            
+            c.setFont("Helvetica-Oblique", 10)
+            c.setFillColorRGB(0.4, 0.4, 0.4)
+            c.drawString(50, y_pos, "Color Legend: Red/Orange = High AI Manipulation | Yellow = Moderate Artifacts | Cold/Clear = Natural Pixels")
+            y_pos -= 15
+            c.drawString(50, y_pos, "Note: The heatmaps highlight the regions of the image that the model considers indicative of manipulation.")
+            y_pos -= 15
+            c.drawString(50, y_pos, "Dark Red/Orange regions signify a high probability of artificial generation.")
+            y_pos -= 15
+            c.drawString(50, y_pos, "Yellow regions show moderate suspicion or potential blending/inpainting.")
+            y_pos -= 15
+            c.drawString(50, y_pos, "Blue/Cool regions (if present) show areas the model largely ignored or considers natural.")
+            c.setFillColorRGB(0, 0, 0)
+            y_pos -= 20
+
+            x_offset = 70
+            img_size = 90
+            for i, heatmap_b64 in enumerate(request.heatmaps):
+                # Move to next row if 5 images are drawn
+                if i > 0 and i % 5 == 0:
+                    y_pos -= (img_size + 20)
+                    x_offset = 70
+                    # Break page if needed
+                    if y_pos < 100:
+                        c.showPage()
+                        add_watermark(c, width, height)
+                try:
+                    b64_data = heatmap_b64.split(",")[1] if "," in heatmap_b64 else heatmap_b64
+                    img_data = base64.b64decode(b64_data)
+                    img = ImageReader(io.BytesIO(img_data))
+                    c.drawImage(img, x_offset, y_pos - img_size, width=img_size, height=img_size)
+                    x_offset += (img_size + 10)
+                except Exception as e:
+                    print("Error drawing heatmap:", e)
+            y_pos -= (img_size + 20)
         
         c.save()
         
@@ -203,6 +250,9 @@ async def generate_audio_report(request: AudioReportRequest):
     buffer = io.BytesIO()
     c = canvas.Canvas(buffer, pagesize=letter)
     width, height = letter
+
+    from watermark import add_watermark
+    add_watermark(c, width, height)
 
     # Header
     c.setFont("Helvetica-Bold", 18)

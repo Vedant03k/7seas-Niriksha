@@ -94,7 +94,13 @@ async def generate_pdf_report(request: ReportRequest):
     data = request.result
     buffer = io.BytesIO()
     c = canvas.Canvas(buffer, pagesize=letter)
-    
+    width, height = letter
+
+    import sys, os
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from watermark import add_watermark
+    add_watermark(c, width, height)
+
     # Header
     c.setFont("Helvetica-Bold", 18)
     c.setStrokeColorRGB(0.2, 0.5, 0.8)

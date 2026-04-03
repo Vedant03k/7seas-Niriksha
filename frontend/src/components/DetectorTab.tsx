@@ -103,7 +103,8 @@ export default function DetectorTab({ acceptType, typeLabel, description, credit
             confidence: result.confidence,
             media_type: result.media_type,
             artifacts_detected: result.artifacts_detected || [],
-            explanation: result.explanation || ''
+            explanation: result.explanation || '',
+            heatmaps: result.heatmaps || []
           })
         });
         if (!resp.ok) throw new Error('Failed to generate report');
@@ -270,12 +271,27 @@ export default function DetectorTab({ acceptType, typeLabel, description, credit
           
           {/* Heatmap Placeholder (Only show if not audio, or show waveform for audio) */}
           {result.media_type !== 'audio' ? (
-            <div className="clay-card border-none flex flex-col items-center justify-center min-h-[250px] relative overflow-hidden group">
-              <div className="absolute inset-0 bg-gradient-to-br from-blue-300/10 to-indigo-300/10 mix-blend-overlay"></div>
-              <Activity size={48} className="text-blue-300 mb-3 group-hover:text-blue-500 transition-colors drop-shadow-md" />
-              <p className="text-slate-600 font-extrabold text-lg">Grad-CAM Heatmap Analysis</p>
-              <p className="text-sm text-slate-500 font-medium mt-1">Visualizing manipulated pixel regions</p>
-            </div>
+            result.verdict.toLowerCase() === 'fake' && (
+              <div className="clay-card border-none flex flex-col items-center justify-center min-h-[250px] relative overflow-hidden group">
+                <div className="absolute inset-0 bg-gradient-to-br from-blue-300/10 to-indigo-300/10 mix-blend-overlay"></div>
+                {result.heatmaps && result.heatmaps.length > 0 ? (
+                  <div className="z-10 w-full p-6">
+                    <p className="text-slate-600 font-extrabold text-lg mb-4 text-center">Grad-CAM Heatmap Analysis</p>
+                    <div className="flex flex-wrap items-center justify-center gap-4">
+                      {result.heatmaps.slice(0, 4).map((hm: string, idx: number) => (
+                        <img key={idx} src={hm} alt={`Heatmap ${idx + 1}`} className="w-48 h-48 object-cover rounded-xl shadow-md border-2 border-white" />
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <Activity size={48} className="text-blue-300 mb-3 group-hover:text-blue-500 transition-colors drop-shadow-md" />
+                    <p className="text-slate-600 font-extrabold text-lg">Grad-CAM Heatmap Analysis</p>
+                    <p className="text-sm text-slate-500 font-medium mt-1">Visualizing manipulated pixel regions</p>
+                  </>
+                )}
+              </div>
+            )
           ) : (
             <div className="clay-card border-none p-8 space-y-6 text-slate-700">
               <h3 className="text-sm font-extrabold uppercase tracking-wider text-slate-400">Multi-Layer Analysis Breakdown</h3>

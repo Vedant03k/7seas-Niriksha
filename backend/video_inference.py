@@ -7,6 +7,7 @@ from PIL import Image
 from torchvision import transforms
 from facenet_pytorch import MTCNN
 import timm
+import base64
 
 # Define the exact model architecture so PyTorch can load the weights
 class VideoDeepfakeModel(nn.Module):
@@ -171,9 +172,128 @@ def analyze_video(video_path: str):
         
     print(f"Evaluated {len(chunked_sequences)} chunks across the whole video. Probabilities: {fake_probs}")
     
+    # --- Grad-CAM Heatmap Generation ---
+    heatmaps_base64 = []
+    if verdict == "FAKE" and len(chunked_sequences) > 0:
+        try:
+            worst_idx = int(np.argmax(fake_probs))
+            worst_chunk = tensor_batch[worst_idx].unsqueeze(0).clone().detach()
+            worst_chunk.requires_grad_(True)
+
+            activations = []
+            gradients = []
+
+            def forward_hook(module, input, output):
+                activations.append(output)
+
+            def backward_hook(module, grad_in, grad_out):
+                gradients.append(grad_out[0])
+
+            target_layer = model.feature_extractor.conv_head
+            handle_forward = target_layer.register_forward_hook(forward_hook)
+            handle_backward = target_layer.register_full_backward_hook(backward_hook)
+
+            # Ensure model handles gradients explicitly
+            with torch.enable_grad():
+                if DEVICE.type == 'cuda':
+                    # Trick PyTorch / cuBLAS into fully initializing on this background thread
+                    _dummy = torch.matmul(torch.ones(1, 1, device=DEVICE, requires_grad=True), torch.ones(1, 1, device=DEVICE))
+                    _dummy.sum().backward()
+                    
+                # cuDNN RNN backward pass explicitly requires the LSTM to be in training mode
+                model.lstm.train()
+                with torch.amp.autocast(device_type=DEVICE.type if DEVICE.type == 'cuda' else 'cpu', enabled=DEVICE.type=='cuda'):
+                    model.zero_grad()
+                    out_logits = model(worst_chunk)
+
+                    # Since the output shape is (1, 1), we can just call backward on it directly
+                    out_logits.backward(torch.ones_like(out_logits))
+                
+                # Revert LSTM to eval mode afterwards
+                model.lstm.eval()
+
+            handle_forward.remove()
+            handle_backward.remove()
+
+            if len(activations) > 0 and len(gradients) > 0:
+                activations = activations[0]
+                gradients = gradients[0]
+                # activations/gradients shape: (sequence_length, channels, height, width) [15, C, H, W]
+                # We extract all 15 frames from the deepfake sequence chunk
+                frame_indices = list(range(15))
+                mean_tensor = torch.tensor([0.485, 0.456, 0.406], device=DEVICE).view(3, 1, 1)
+                std_tensor = torch.tensor([0.229, 0.224, 0.225], device=DEVICE).view(3, 1, 1)
+
+                for f_idx in frame_indices:
+                    if f_idx < activations.size(0):
+                        act = activations[f_idx]
+                        grad = gradients[f_idx]
+
+                        # Global average pooling on gradients to get weights
+                        weights = torch.mean(grad, dim=(1, 2), keepdim=True)
+                        cam = torch.sum(weights * act, dim=0)
+                        cam = torch.relu(cam)
+
+                        cam_np = cam.detach().cpu().float().numpy()
+                        
+                        if np.isnan(cam_np).any() or np.max(cam_np) == 0:
+                            continue
+                            
+                        # Normalize to 0-1
+                        cam_np = cam_np / np.max(cam_np)
+                        
+                        # Apply a non-linear Gamma correction stretch (power curve)
+                        # This mathematically boosts the lower "secondary" areas the model looked at
+                        # (like eyes, nose, lips, hair) so they show up brightly too!
+                        cam_np = np.power(cam_np, 0.4)
+                        
+                        cam_resized = cv2.resize(cam_np, (FACE_SIZE, FACE_SIZE))
+                        
+                        # Smooth the heatmap organically
+                        cam_resized = cv2.GaussianBlur(cam_resized, (21, 21), 0)
+                        
+                        # Only strip the absolute dead 0-value background static
+                        cam_resized = np.where(cam_resized < 0.05, 0, cam_resized)
+                        if np.max(cam_resized) > 0:
+                            cam_resized = cam_resized / np.max(cam_resized)
+
+                        cam_uint8 = np.uint8(255 * cam_resized)
+                        heatmap = cv2.applyColorMap(cam_uint8, cv2.COLORMAP_JET)
+
+                        # Denormalize original image
+                        orig_tensor = worst_chunk[0, f_idx].detach() * std_tensor + mean_tensor
+                        orig_tensor = torch.clamp(orig_tensor, 0, 1)
+                        orig_np = (orig_tensor.cpu().numpy() * 255).astype(np.uint8)
+                        orig_np = np.transpose(orig_np, (1, 2, 0)) # H, W, C
+                        orig_bgr = cv2.cvtColor(orig_np, cv2.COLOR_RGB2BGR)
+
+                        # Only apply heatmap colors to the 'hot' regions. Cold regions remain the natural face.
+                        # cam_resized (0 to 1) acts as our blending alpha mask. 
+                        # We use a max of 0.70 opacity so the face features underneath are still highly visible
+                        alpha = np.expand_dims(cam_resized, axis=-1) * 0.70
+                        overlay = (heatmap * alpha + orig_bgr * (1.0 - alpha)).astype(np.uint8)
+                        
+                        _, buffer = cv2.imencode('.jpg', overlay)
+                        b64_str = base64.b64encode(buffer).decode('utf-8')
+                        heatmaps_base64.append(f"data:image/jpeg;base64,{b64_str}")
+        except Exception as e:
+            import traceback
+            trace_str = traceback.format_exc()
+            print(f"FAILED TO GENERATE GRAD-CAM: {e}\n{trace_str}")
+            # If generating heatmaps fail, we still want to return the main verdict!
+            
+            # Send a fake image just to show an error heatmap on UI
+            msg = "Error during Heatmap GPU Sync"
+            blank_img = np.zeros((FACE_SIZE, FACE_SIZE, 3), dtype=np.uint8)
+            cv2.putText(blank_img, "GPU ERROR", (20, 150), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+            _, buffer = cv2.imencode('.jpg', blank_img)
+            heatmaps_base64.append(f"data:image/jpeg;base64,{base64.b64encode(buffer).decode('utf-8')}")
+            pass
+
     return {
         "verdict": verdict,
         "confidence": confidence,
         "probability": max_fake_prob,
-        "timeline_average": avg_fake_prob
+        "timeline_average": avg_fake_prob,
+        "heatmaps": heatmaps_base64
     }
