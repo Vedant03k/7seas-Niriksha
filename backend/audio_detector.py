@@ -169,6 +169,67 @@ class AudioDeepfakeDetector:
         combined = float(np.mean(scores)) if scores else 0.0
         return min(combined, 1.0), artifacts
 
+    # ── Layer 2b: Spectral temporal consistency ───────────────────────────
+
+    @staticmethod
+    def _spectral_consistency_score(audio: np.ndarray, sr: int = 16000):
+        """
+        Modern TTS (ElevenLabs, XTTS) produces unusually consistent
+        frame-to-frame spectra. Measure cosine similarity between consecutive
+        frames — real speech has more variation.
+        """
+        artifacts = []
+        frame_len = int(0.025 * sr)
+        hop = int(0.010 * sr)
+        n_fft = max(512, frame_len)
+
+        prev_spectrum = None
+        cosine_sims = []
+
+        for start in range(0, len(audio) - frame_len, hop):
+            frame = audio[start:start + frame_len]
+            windowed = frame * np.hanning(len(frame))
+            spectrum = np.abs(np.fft.rfft(windowed, n=n_fft))
+            norm = np.linalg.norm(spectrum)
+            if norm < 1e-12:
+                prev_spectrum = None
+                continue
+            spectrum_normed = spectrum / norm
+
+            if prev_spectrum is not None:
+                cos_sim = float(np.dot(prev_spectrum, spectrum_normed))
+                cosine_sims.append(cos_sim)
+            prev_spectrum = spectrum_normed
+
+        if len(cosine_sims) < 10:
+            return 0.0, artifacts
+
+        sim_arr = np.array(cosine_sims)
+        mean_sim = float(np.mean(sim_arr))
+        std_sim = float(np.std(sim_arr))
+
+        score = 0.0
+        # TTS tends to have high mean cosine similarity
+        if mean_sim > 0.93:
+            score += 0.5
+            artifacts.append(f"Very high spectral frame consistency (cos={mean_sim:.4f}) — typical of neural TTS")
+        elif mean_sim > 0.90:
+            score += 0.3
+            artifacts.append(f"High spectral frame consistency (cos={mean_sim:.4f}) — possible neural TTS artifact")
+        elif mean_sim > 0.87:
+            score += 0.15
+            artifacts.append(f"Elevated spectral frame consistency (cos={mean_sim:.4f}) — above natural speech norms")
+
+        # TTS also has low std in frame similarity (very uniform)
+        if std_sim < 0.05:
+            score += 0.3
+            artifacts.append(f"Low spectral variation (std={std_sim:.4f}) — unnaturally uniform frame-to-frame transitions")
+        elif std_sim < 0.10:
+            score += 0.15
+            artifacts.append(f"Moderately low spectral variation (std={std_sim:.4f}) — less variation than typical speech")
+
+        return min(score, 1.0), artifacts
+
     # ── Layer 3: MFCC analysis ────────────────────────────────────────────
 
     @staticmethod
@@ -230,9 +291,15 @@ class AudioDeepfakeDetector:
 
         # AI voices tend to have lower delta variance (smoother transitions)
         mean_delta_std = float(np.mean(delta_std[1:]))  # skip c0
-        if mean_delta_std < 1.5:
-            scores.append(0.5)
+        if mean_delta_std < 0.7:
+            scores.append(0.8)
+            artifacts.append(f"Very low MFCC delta variance ({mean_delta_std:.2f}) — strongly synthetic cepstral pattern")
+        elif mean_delta_std < 1.0:
+            scores.append(0.6)
             artifacts.append(f"Low MFCC delta variance ({mean_delta_std:.2f}) — overly smooth cepstral transitions")
+        elif mean_delta_std < 1.4:
+            scores.append(0.35)
+            artifacts.append(f"Below-average MFCC delta variance ({mean_delta_std:.2f}) — smoother than typical speech")
         else:
             scores.append(0.0)
 
@@ -382,22 +449,60 @@ class AudioDeepfakeDetector:
                 self.W_PITCH   * pitch_fake
             )
 
-            # Anomaly-based boost: if 2+ non-neural layers detect artifacts,
-            # boost the fake score to account for modern TTS that fools neural models
-            artifact_layers = sum([
-                1 if spectral_fake > 0.2 else 0,
-                1 if mfcc_fake > 0.2 else 0,
-                1 if pitch_fake > 0.2 else 0,
-            ])
-            if artifact_layers >= 2 and ensemble_fake < 0.5:
-                non_neural_avg = (spectral_fake + mfcc_fake + pitch_fake) / 3.0
+            # Anomaly-based boost: non-neural layers detect artifacts that
+            # modern TTS (ElevenLabs, XTTS) produce despite fooling neural models
+            non_neural_scores = [spectral_fake, spectral_cons_fake, mfcc_fake, pitch_fake, silence_fake]
+            artifact_layers = sum(1 for s in non_neural_scores if s > 0.15)
+            strong_artifact_layers = sum(1 for s in non_neural_scores if s >= 0.28)
+
+            if artifact_layers >= 3 and strong_artifact_layers >= 2 and ensemble_fake < 0.5:
+                # Strong multi-layer evidence — very likely synthetic
+                non_neural_avg = np.mean(non_neural_scores)
+                non_neural_max = max(non_neural_scores)
+                boost = (non_neural_avg + non_neural_max) * 0.35
+                ensemble_fake = min(ensemble_fake + boost, 0.90)
+            elif artifact_layers >= 2 and strong_artifact_layers >= 1 and ensemble_fake < 0.5:
+                non_neural_avg = np.mean(non_neural_scores)
                 boost = non_neural_avg * 0.3
-                ensemble_fake = min(ensemble_fake + boost, 0.95)
+                ensemble_fake = min(ensemble_fake + boost, 0.85)
+
+            # Neural-statistical disagreement: if neural says real (<0.2) but
+            # statistical evidence says fake, apply skepticism
+            non_neural_avg = np.mean(non_neural_scores)
+            non_neural_max = max(non_neural_scores)
+            if neural_fake < 0.2 and non_neural_avg > 0.15 and strong_artifact_layers >= 1:
+                skepticism_boost = (non_neural_avg + non_neural_max) * 0.25
+                ensemble_fake = min(ensemble_fake + skepticism_boost, 0.85)
+
+            # Pitch dampener: only apply when statistical evidence is weak
+            # (avoids suppressing legitimate fake signals from ElevenLabs v2 etc.)
+            if pitch_fake == 0.0 and ensemble_fake > 0.4 and neural_fake < 0.3:
+                if artifact_layers <= 1 and strong_artifact_layers == 0:
+                    ensemble_fake *= 0.75
 
             # Strong neural signal override: if neural model is very confident
             # about fake (>0.8), trust it — use the neural score directly as floor
             if neural_fake > 0.8:
                 ensemble_fake = max(ensemble_fake, neural_fake * 0.85)
+
+            # Codec-aware correction: m4a/AAC/OGG codecs introduce spectral
+            # artifacts that the neural model (trained on WAV/MP3) mistakes for
+            # synthesis patterns, producing ~95-97% fake scores on real recordings.
+            # When the neural score is very high but statistical analysis layers
+            # do NOT corroborate (analysis_avg < 0.4) and pitch is clean,
+            # recalculate with statistical evidence as the neural proxy.
+            file_ext = os.path.splitext(file_path)[1].lower()
+            if file_ext in ('.m4a', '.aac', '.ogg', '.opus') and neural_fake > 0.8:
+                analysis_avg = np.mean([spectral_fake, spectral_cons_fake, mfcc_fake])
+                if pitch_fake < 0.1 and analysis_avg < 0.4:
+                    ensemble_fake = (
+                        self.W_NEURAL * analysis_avg +
+                        self.W_SPECTRAL * spectral_fake +
+                        self.W_SPECTRAL_CONSISTENCY * spectral_cons_fake +
+                        self.W_MFCC * mfcc_fake +
+                        self.W_PITCH * pitch_fake +
+                        self.W_SILENCE * silence_fake
+                    )
 
             ensemble_real = 1.0 - ensemble_fake
 

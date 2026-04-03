@@ -29,8 +29,8 @@ async def image_health():
         detector = get_detector()
         return {
             "status": "ok",
-            "model": "EfficientNet-B4 + FFT + GradCAM",
-            "device": str(detector.model.backbone.parameters().__next__().device),
+            "model": "ViT AI Detector + FFT + GradCAM",
+            "device": str(next(detector.model.parameters()).device),
             "message": "Image detector ready"
         }
     except Exception as e:
