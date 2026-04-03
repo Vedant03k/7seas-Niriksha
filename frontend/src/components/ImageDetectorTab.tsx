@@ -380,7 +380,7 @@ export default function ImageDetectorTab() {
                   Multi-Layer Analysis Breakdown
                 </h3>
                 <ScoreRow
-                  label="Neural Network (EfficientNet-B4)"
+                  label="Neural Network (Vision Transformer)"
                   value={result.model_scores.neural_network_fake_prob}
                   color="bg-red-500"
                 />

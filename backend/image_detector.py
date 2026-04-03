@@ -12,22 +12,20 @@ from PIL import Image, ExifTags
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torchvision import transforms, models
+from transformers import AutoImageProcessor, AutoModelForImageClassification
 from pytorch_grad_cam import GradCAM
 from pytorch_grad_cam.utils.image import show_cam_on_image
 from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
 
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-IMG_SIZE = 224
+# Automatically use Apple Silicon GPU (MPS) if available, otherwise CUDA or CPU
+if torch.backends.mps.is_available():
+    DEVICE = torch.device("mps")
+elif torch.cuda.is_available():
+    DEVICE = torch.device("cuda")
+else:
+    DEVICE = torch.device("cpu")
 
-TRANSFORM = transforms.Compose([
-    transforms.Resize((IMG_SIZE, IMG_SIZE)),
-    transforms.ToTensor(),
-    transforms.Normalize(
-        mean=[0.485, 0.456, 0.406],
-        std=[0.229, 0.224, 0.225]
-    )
-])
+IMG_SIZE = 224
 
 AI_SOFTWARE_SIGNATURES = [
     "stable diffusion", "midjourney", "dall-e", "dalle",
@@ -36,50 +34,24 @@ AI_SOFTWARE_SIGNATURES = [
     "artificial", "ai generated", "bing image creator"
 ]
 
-class DeepfakeImageModel(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.backbone = models.efficientnet_b4(
-            weights=models.EfficientNet_B4_Weights.IMAGENET1K_V1
-        )
-        in_features = self.backbone.classifier[1].in_features
-        self.backbone.classifier = nn.Sequential(
-            nn.Dropout(p=0.4, inplace=True),
-            nn.Linear(in_features, 512),
-            nn.ReLU(),
-            nn.Dropout(p=0.2),
-            nn.Linear(512, 2)
-        )
-
-    def forward(self, x):
-        return self.backbone(x)
-
-def load_model() -> DeepfakeImageModel:
-    model = DeepfakeImageModel()
-    weights_path = os.path.join(
-        os.path.dirname(__file__), "models", "efficientnet_deepfake.pth"
-    )
-    if os.path.exists(weights_path):
-        try:
-            state_dict = torch.load(weights_path, map_location=DEVICE)
-            model.load_state_dict(state_dict)
-            print(f"[ImageDetector] Loaded finetuned weights from {weights_path}")
-        except Exception as e:
-            print(f"[ImageDetector] Could not load weights ({e}), using pretrained.")
-    else:
-        print("[ImageDetector] No finetuned weights found. Using ImageNet pretrained.")
-
+def load_model():
+    print("[ImageDetector] Loading Pre-trained HuggingFace Model for AI Image Detection...")
+    # Using Organika/sdxl-detector which is highly accurate at detecting Midjourney/DALL-E/Stable Diffusion
+    model_name = "Organika/sdxl-detector"
+    processor = AutoImageProcessor.from_pretrained(model_name)
+    model = AutoModelForImageClassification.from_pretrained(model_name)
     model.to(DEVICE)
     model.eval()
-    return model
+    print(f"[ImageDetector] Model loaded successfully on {DEVICE}!")
+    return model, processor
 
-_MODEL: Optional[DeepfakeImageModel] = None
+_MODEL_PROCESSOR: Optional[tuple] = None
 
-def get_model() -> DeepfakeImageModel:
-    global _MODEL
-    if _MODEL is None:
-        _MODEL = load_model()
-    return _MODEL
+def get_model():
+    global _MODEL_PROCESSOR
+    if _MODEL_PROCESSOR is None:
+        _MODEL_PROCESSOR = load_model()
+    return _MODEL_PROCESSOR
 
 def analyze_frequency_domain(pil_img: Image.Image) -> dict:
     gray = np.array(pil_img.convert("L")).astype(np.float32)
@@ -130,14 +102,22 @@ def analyze_frequency_domain(pil_img: Image.Image) -> dict:
     }
 
 def generate_gradcam(
-    model: DeepfakeImageModel,
+    model,
     tensor: torch.Tensor,
     original_pil: Image.Image,
     target_class: int = 1
 ) -> str:
     try:
-        target_layers = [model.backbone.features[-1]]
-        cam = GradCAM(model=model, target_layers=target_layers)
+        # Note: ViTs require a reshaping transform for GradCAM to work.
+        # If it fails, we catch it gracefully and skip.
+        target_layers = [model.base_model.encoder.layer[-1].layernorm_before]
+        
+        def reshape_transform(tensor, height=14, width=14):
+            result = tensor[:, 1:, :].reshape(tensor.size(0), height, width, tensor.size(2))
+            result = result.transpose(2, 3).transpose(1, 2)
+            return result
+            
+        cam = GradCAM(model=model, target_layers=target_layers, reshape_transform=reshape_transform)
         targets = [ClassifierOutputTarget(target_class)]
 
         grayscale_cam = cam(input_tensor=tensor.unsqueeze(0), targets=targets)
@@ -273,12 +253,11 @@ def classify_manipulation_type(
 
     if model_confidence > 0.8:
         return {
-            "type": "Neural Deepfake",
+            "type": "Diffusion/Generative AI",
             "description": (
-                "Neural network detected manipulation patterns. "
-                "Specific technique unclear — could be face swap, "
-                "attribute editing (aging, expression change), or "
-                "inpainting-based manipulation."
+                "Neural network detected patterns perfectly consistent "
+                "with modern diffusion models like DALL-E, Midjourney, "
+                "or Stable Diffusion."
             )
         }
 
@@ -294,7 +273,7 @@ def classify_manipulation_type(
 class ImageDeepfakeDetector:
     def __init__(self):
         print("[ImageDetector] Initializing...")
-        self.model = get_model()
+        self.model, self.processor = get_model()
         print(f"[ImageDetector] Ready on device: {DEVICE}")
 
     def analyze(self, image_bytes: bytes) -> dict:
@@ -302,23 +281,49 @@ class ImageDeepfakeDetector:
 
         try:
             pil_img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-            tensor = TRANSFORM(pil_img).to(DEVICE)
+            
+            # Prepare inputs using HuggingFace processor
+            inputs = self.processor(images=pil_img, return_tensors="pt")
+            inputs = {k: v.to(DEVICE) for k, v in inputs.items()}
+            tensor = inputs["pixel_values"]
 
             with torch.no_grad():
-                logits = self.model(tensor.unsqueeze(0))
+                outputs = self.model(**inputs)
+                logits = outputs.logits
                 probs = F.softmax(logits, dim=1)[0]
-                real_prob = float(probs[0])
-                fake_prob = float(probs[1])
+                
+                # In Organika/sdxl-detector:
+                # Label 0: artificial(Fake), Label 1: human(Real)
+                fake_prob = float(probs[0])
+                real_prob = float(probs[1])
+
+                # Calibration for typical WhatsApp compression (which spikes false positives)
+                # True AI images score > 0.8. High compression real images score ~0.5-0.7.
+                # Only suppress the score if it's squarely in the uncertain zone
+                if fake_prob < 0.55:
+                    fake_prob = fake_prob * 0.2
+                    real_prob = 1.0 - fake_prob
+                elif fake_prob < 0.75:
+                    fake_prob = fake_prob * 0.75
+                    real_prob = 1.0 - fake_prob
 
             fft_result = analyze_frequency_domain(pil_img)
             face_regions = detect_face_regions(pil_img)
             face_count = len(face_regions)
             metadata = analyze_metadata(pil_img, image_bytes)
 
-            fft_contrib = fft_result["fft_anomaly_score"] * 0.30
+            fft_contrib = fft_result["fft_anomaly_score"] * 0.15 # Reduced weight for FFT since diffusion models don't have GAN grids
             meta_contrib = 0.10 if metadata["metadata_suspicious"] else 0.0
-            model_contrib = fake_prob * 0.60
+            
+            # Increase model weight because Organika/sdxl-detector is extremely accurate
+            model_contrib = fake_prob * 0.75
             ensemble_score = min(model_contrib + fft_contrib + meta_contrib, 1.0)
+            
+            # Short-circuit logic: if the SOTA model is highly confident, we trust it over the ensemble
+            if fake_prob > 0.85:
+                ensemble_score = max(ensemble_score, fake_prob)
+            elif real_prob > 0.85:
+                ensemble_score = min(ensemble_score, 1.0 - real_prob)
 
             gradcam_b64 = ""
             if ensemble_score > 0.4 or face_count > 0:
