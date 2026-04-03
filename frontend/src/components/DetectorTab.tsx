@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { UploadCloud, FileVideo, Image as ImageIcon, CheckCircle, AlertOctagon, Activity, FileAudio, Zap, Crown, Download } from 'lucide-react';
+import { UploadCloud, FileVideo, Image as ImageIcon, CheckCircle, AlertOctagon, Activity, FileAudio, Zap, Crown, Download, Brain, BarChart3, Music, Mic } from 'lucide-react';
 
 interface DetectorTabProps {
   acceptType: string;
@@ -255,20 +255,22 @@ export default function DetectorTab({ acceptType, typeLabel, description, credit
               {result.sub_scores ? (
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
                   {[
-                    { label: 'Neural Model', key: 'neural_model', icon: '🧠' },
-                    { label: 'Spectral', key: 'spectral_analysis', icon: '📊' },
-                    { label: 'MFCC', key: 'mfcc_analysis', icon: '🎵' },
-                    { label: 'Pitch/Prosody', key: 'pitch_prosody', icon: '🎤' },
+                    { label: 'Neural Model', key: 'neural_model', Icon: Brain },
+                    { label: 'Spectral', key: 'spectral_analysis', Icon: BarChart3 },
+                    { label: 'MFCC', key: 'mfcc_analysis', Icon: Music },
+                    { label: 'Pitch/Prosody', key: 'pitch_prosody', Icon: Mic },
                   ].map((item) => {
                     const score = result.sub_scores[item.key] ?? 0;
                     const pct = (score * 100).toFixed(1);
                     const isSuspicious = score > 0.5;
                     return (
-                      <div key={item.key} className={`rounded-[1.5rem] p-5 text-center transition-all ${isSuspicious ? 'bg-rose-50 border-2 border-rose-200 text-rose-700 shadow-sm' : 'bg-emerald-50 border-2 border-emerald-200 text-emerald-700 shadow-sm'}`}>
-                        <div className="text-3xl mb-2 drop-shadow-sm">{item.icon}</div>
-                        <div className="text-xs font-bold uppercase tracking-wider mb-2 opacity-80">{item.label}</div>
-                        <div className={`text-xl font-black drop-shadow-sm ${isSuspicious ? 'text-rose-600' : 'text-emerald-600'}`}>{pct}%</div>
-                        <div className="text-sm font-bold text-slate-500 mt-2">{isSuspicious ? 'Suspicious' : 'Normal'}</div>
+                      <div key={item.key} className="bg-white rounded-2xl p-5 text-center transition-all border-2 border-white shadow-[4px_4px_8px_rgba(170,190,230,0.4),inset_-2px_-2px_4px_rgba(170,190,230,0.2),inset_2px_2px_4px_white]">
+                        <div className={`w-10 h-10 mx-auto mb-3 rounded-xl flex items-center justify-center ${isSuspicious ? 'bg-rose-50' : 'bg-emerald-50'}`}>
+                          <item.Icon size={20} className={isSuspicious ? 'text-rose-500' : 'text-emerald-500'} />
+                        </div>
+                        <div className="text-xs font-bold uppercase tracking-wider mb-1 text-slate-500">{item.label}</div>
+                        <div className={`text-xl font-black ${isSuspicious ? 'text-rose-600' : 'text-emerald-600'}`}>{pct}%</div>
+                        <div className={`text-xs font-semibold mt-1 ${isSuspicious ? 'text-rose-500' : 'text-emerald-500'}`}>{isSuspicious ? 'Suspicious' : 'Normal'}</div>
                       </div>
                     );
                   })}

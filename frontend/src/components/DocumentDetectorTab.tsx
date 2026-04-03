@@ -1,18 +1,18 @@
 import { useState } from 'react';
-import { UploadCloud, FileText, CheckCircle, AlertOctagon, Activity, Zap, Crown, Shield, Eye, Type, Fingerprint, Layers, Download } from 'lucide-react';
+import { UploadCloud, FileText, CheckCircle, AlertOctagon, Activity, Zap, Crown, Shield, Eye, Type, Fingerprint, Layers, Download, Search, BarChart3, ScanEye, FileSearch, Lock } from 'lucide-react';
 
 interface DocumentDetectorTabProps {
   credits: number;
   setCredits: (val: number) => void;
 }
 
-const ANALYSIS_ICONS: Record<string, { icon: string; label: string }> = {
-  metadata_forensics: { icon: '🔍', label: 'Metadata' },
-  structural_analysis: { icon: '🏗️', label: 'Structure' },
-  visual_ela: { icon: '👁️', label: 'Visual/ELA' },
-  text_consistency: { icon: '📝', label: 'Text Analysis' },
-  digital_signature: { icon: '🔐', label: 'Signature' },
-};
+const ANALYSIS_KEYS = [
+  { key: 'metadata_forensics', label: 'Metadata', Icon: Search },
+  { key: 'structural_analysis', label: 'Structure', Icon: BarChart3 },
+  { key: 'visual_ela', label: 'Visual/ELA', Icon: ScanEye },
+  { key: 'text_consistency', label: 'Text Analysis', Icon: FileSearch },
+  { key: 'digital_signature', label: 'Signature', Icon: Lock },
+];
 
 export default function DocumentDetectorTab({ credits, setCredits }: DocumentDetectorTabProps) {
   const [file, setFile] = useState<File | null>(null);
@@ -215,6 +215,13 @@ export default function DocumentDetectorTab({ credits, setCredits }: DocumentDet
                 <span className="opacity-90 font-semibold text-lg">AI Confidence Score</span>
                 <span className="font-extrabold text-3xl drop-shadow-sm">{(result.confidence * 100).toFixed(1)}%</span>
               </div>
+              {result.verdict === 'REAL' && result.sub_scores && Object.values(result.sub_scores).some((s: any) => s > 0.3) && (
+                <div className="mt-4 bg-white/20 rounded-xl p-3 border border-white/30">
+                  <p className="text-sm font-bold opacity-95">
+                    ⚠️ Some analysis layers flagged suspicious indicators — this document may still contain AI-generated or manipulated content.
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Anomalies */}
@@ -239,20 +246,47 @@ export default function DocumentDetectorTab({ credits, setCredits }: DocumentDet
             <div className="clay-card border-none p-8 space-y-6 text-slate-700">
               <h3 className="text-sm font-extrabold uppercase tracking-wider text-slate-400">Multi-Layer Analysis Breakdown</h3>
               <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                {Object.entries(ANALYSIS_ICONS).map(([key, { icon, label }]) => {
+                {ANALYSIS_KEYS.map(({ key, label, Icon }) => {
                   const score = result.sub_scores[key] ?? 0;
                   const pct = (score * 100).toFixed(1);
                   const isSuspicious = score > 0.3;
                   return (
-                    <div key={key} className={`rounded-[1.5rem] p-5 text-center transition-all ${isSuspicious ? 'bg-rose-50 border-2 border-rose-200 text-rose-700 shadow-sm' : 'bg-emerald-50 border-2 border-emerald-200 text-emerald-700 shadow-sm'}`}>
-                      <div className="text-3xl mb-2 drop-shadow-sm">{icon}</div>
-                      <div className="text-xs font-bold uppercase tracking-wider mb-2 opacity-80">{label}</div>
-                      <div className={`text-xl font-black drop-shadow-sm ${isSuspicious ? 'text-rose-600' : 'text-emerald-600'}`}>{pct}%</div>
-                      <div className="text-sm font-bold text-slate-500 mt-2">{isSuspicious ? 'Suspicious' : 'Normal'}</div>
+                    <div key={key} className="bg-white rounded-2xl p-5 text-center transition-all border-2 border-white shadow-[4px_4px_8px_rgba(170,190,230,0.4),inset_-2px_-2px_4px_rgba(170,190,230,0.2),inset_2px_2px_4px_white]">
+                      <div className={`w-10 h-10 mx-auto mb-3 rounded-xl flex items-center justify-center ${isSuspicious ? 'bg-rose-50' : 'bg-emerald-50'}`}>
+                        <Icon size={20} className={isSuspicious ? 'text-rose-500' : 'text-emerald-500'} />
+                      </div>
+                      <div className="text-xs font-bold uppercase tracking-wider mb-1 text-slate-500">{label}</div>
+                      <div className={`text-xl font-black ${isSuspicious ? 'text-rose-600' : 'text-emerald-600'}`}>{pct}%</div>
+                      <div className={`text-xs font-semibold mt-1 ${isSuspicious ? 'text-rose-500' : 'text-emerald-500'}`}>{isSuspicious ? 'Suspicious' : 'Normal'}</div>
                     </div>
                   );
                 })}
               </div>
+
+              {/* Suspicious layer insight */}
+              {(() => {
+                const flagged = ANALYSIS_KEYS
+                  .filter(({ key }) => (result.sub_scores[key] ?? 0) > 0.3)
+                  .map(({ label }) => label);
+                if (flagged.length > 0) {
+                  return (
+                    <div className="bg-rose-50 border-2 border-rose-200 rounded-2xl p-5 flex items-start space-x-3">
+                      <AlertOctagon size={22} className="text-rose-500 mt-0.5 shrink-0" />
+                      <div>
+                        <p className="font-bold text-rose-700 text-sm">
+                          Warning: This document may be AI-generated or forged
+                        </p>
+                        <p className="text-rose-600 text-sm mt-1">
+                          {flagged.length === 1
+                            ? `The ${flagged[0]} layer flagged suspicious indicators — this suggests the document could have been artificially created or tampered with.`
+                            : `${flagged.join(', ')} layers flagged suspicious indicators — multiple red flags increase the likelihood that this document is AI-generated or manipulated.`}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
             </div>
           )}
 
