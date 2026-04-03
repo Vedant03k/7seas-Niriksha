@@ -21,10 +21,10 @@ class AudioDeepfakeDetector:
     """
 
     # --- Ensemble weights (neural model is dominant, stats are supplementary) ---
-    W_NEURAL  = 0.60
-    W_SPECTRAL = 0.15
-    W_MFCC    = 0.10
-    W_PITCH   = 0.15
+    W_NEURAL  = 0.45
+    W_SPECTRAL = 0.20
+    W_MFCC    = 0.15
+    W_PITCH   = 0.20
 
     def __init__(self):
         # Prefer locally fine-tuned model, fall back to HuggingFace remote model
@@ -37,8 +37,11 @@ class AudioDeepfakeDetector:
             print(f"Loading HuggingFace model: {self.model_name} ...")
             print("  (Tip: Run 'python train_model.py' to fine-tune a local model for better accuracy)")
 
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print(f"Using device: {self.device}")
         self.processor = Wav2Vec2FeatureExtractor.from_pretrained(self.model_name)
         self.model = Wav2Vec2ForSequenceClassification.from_pretrained(self.model_name)
+        self.model.to(self.device)
         self.model.eval()
         print("Model loaded successfully.")
 
@@ -74,6 +77,7 @@ class AudioDeepfakeDetector:
         inputs = self.processor(
             audio, sampling_rate=16000, return_tensors="pt", padding=True
         )
+        inputs = {k: v.to(self.device) for k, v in inputs.items()}
         with torch.no_grad():
             logits = self.model(**inputs).logits
             probs = torch.softmax(logits, dim=-1)
@@ -352,6 +356,24 @@ class AudioDeepfakeDetector:
                 self.W_MFCC    * mfcc_fake +
                 self.W_PITCH   * pitch_fake
             )
+
+            # Anomaly-based boost: if 2+ non-neural layers detect artifacts,
+            # boost the fake score to account for modern TTS that fools neural models
+            artifact_layers = sum([
+                1 if spectral_fake > 0.2 else 0,
+                1 if mfcc_fake > 0.2 else 0,
+                1 if pitch_fake > 0.2 else 0,
+            ])
+            if artifact_layers >= 2 and ensemble_fake < 0.5:
+                non_neural_avg = (spectral_fake + mfcc_fake + pitch_fake) / 3.0
+                boost = non_neural_avg * 0.3
+                ensemble_fake = min(ensemble_fake + boost, 0.95)
+
+            # Strong neural signal override: if neural model is very confident
+            # about fake (>0.8), trust it — use the neural score directly as floor
+            if neural_fake > 0.8:
+                ensemble_fake = max(ensemble_fake, neural_fake * 0.85)
+
             ensemble_real = 1.0 - ensemble_fake
 
             verdict = "FAKE" if ensemble_fake > 0.5 else "REAL"
