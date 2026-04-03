@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { Activity, Layers, Image as ImageIcon, FileVideo, Music, LogOut, LogIn, Loader2, Zap } from 'lucide-react';
+import { Activity, Layers, Image as ImageIcon, FileVideo, Music, FileText, LogOut, LogIn, Loader2, Zap } from 'lucide-react';
 import { useAuth0 } from '@auth0/auth0-react';
 import DetectorTab from './components/DetectorTab';
 import ImageDetectorTab from './components/ImageDetectorTab';
+import DocumentDetectorTab from './components/DocumentDetectorTab';
 import nirikshaLogo from './assets/nirikshalogo.png';
 
-type TabType = 'COMBINED' | 'IMAGE' | 'VIDEO' | 'AUDIO';
+type TabType = 'COMBINED' | 'IMAGE' | 'VIDEO' | 'AUDIO' | 'DOCUMENT';
 
 function App() {
   const { isAuthenticated, isLoading, loginWithRedirect, logout, user } = useAuth0();
@@ -16,7 +17,8 @@ function App() {
     { id: 'COMBINED', label: 'All-in-One Detector', icon: Layers, accept: 'image/*,video/*,audio/*', desc: 'Upload any image, video, or audio file. Our multimodal AI engine will automatically route it to the appropriate model for deepfake analysis.' },
     { id: 'IMAGE', label: 'Image Forensics', icon: ImageIcon, accept: 'image/*', desc: 'Specially tuned Xception/EfficientNet engine designed to detect GAN artifacts and pixel-level inconsistencies in static images.' },
     { id: 'VIDEO', label: 'Video Analysis', icon: FileVideo, accept: 'video/*', desc: 'Analyzes temporal consistency across frames, utilizing lip-sync matching and facial landmark drift checking.' },
-    { id: 'AUDIO', label: 'Audio & Voice', icon: Music, accept: 'audio/*', desc: 'Uses Wav2Vec2 and LCNN to extract spectrogram features detecting modern voice cloning (TTS, voice-conversion).' }
+    { id: 'AUDIO', label: 'Audio & Voice', icon: Music, accept: 'audio/*', desc: 'Uses Wav2Vec2 and LCNN to extract spectrogram features detecting modern voice cloning (TTS, voice-conversion).' },
+    { id: 'DOCUMENT', label: 'Document Forensics', icon: FileText, accept: 'application/pdf,.pdf', desc: 'Multi-layer PDF forensic analysis: metadata tampering, structural anomalies, image ELA, AI-generated text detection, and digital signature verification.' }
   ];
 
   const currentTabInfo = TABS.find(t => t.id === activeTab);
@@ -138,6 +140,8 @@ function App() {
           <div className="relative z-10">
             {activeTab === 'IMAGE' ? (
               <ImageDetectorTab />
+            ) : activeTab === 'DOCUMENT' ? (
+              <DocumentDetectorTab credits={credits} setCredits={setCredits} />
             ) : currentTabInfo ? (
               <DetectorTab 
                 key={activeTab} 

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { UploadCloud, FileVideo, Image as ImageIcon, CheckCircle, AlertOctagon, Activity, FileAudio, Zap, Crown } from 'lucide-react';
+import { UploadCloud, FileVideo, Image as ImageIcon, CheckCircle, AlertOctagon, Activity, FileAudio, Zap, Crown, Download } from 'lucide-react';
 
 interface DetectorTabProps {
   acceptType: string;
@@ -14,6 +14,7 @@ export default function DetectorTab({ acceptType, typeLabel, description, credit
   const [analyzing, setAnalyzing] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [showPaywall, setShowPaywall] = useState(false);
+  const [generatingReport, setGeneratingReport] = useState(false);
 
   const getCost = (fileType: string) => fileType.includes('video') ? 100 : 50;
 
@@ -88,6 +89,33 @@ export default function DetectorTab({ acceptType, typeLabel, description, credit
       return <ImageIcon size={48} className="text-blue-500 drop-shadow-md" />;
     }
     return <UploadCloud size={48} className="text-blue-400 drop-shadow-sm" />;
+  };
+
+  const handleDownloadReport = async () => {
+    if (!result || result.media_type !== 'audio') return;
+    setGeneratingReport(true);
+    try {
+      const payload = { ...result, filename: file?.name || 'unknown' };
+      const response = await fetch('/api/analyze/audio/report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ result: payload }),
+      });
+      if (!response.ok) throw new Error('Failed to generate report');
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Niriksha_Audio_Report_${(file?.name || 'audio').replace(/\.[^.]+$/, '')}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Report generation failed:', err);
+    } finally {
+      setGeneratingReport(false);
+    }
   };
 
   return (
@@ -251,6 +279,24 @@ export default function DetectorTab({ acceptType, typeLabel, description, credit
                   <p className="text-slate-600 font-extrabold text-lg">Frequency / Spectrogram Analysis</p>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Download Report Button (Audio only) */}
+          {result.media_type === 'audio' && (
+            <div className="flex justify-center pt-4">
+              <button
+                onClick={handleDownloadReport}
+                disabled={generatingReport}
+                className="clay-btn px-8 py-3 text-base flex items-center space-x-3 disabled:opacity-70"
+              >
+                {generatingReport ? (
+                  <Activity className="animate-spin" size={20} />
+                ) : (
+                  <Download size={20} />
+                )}
+                <span>{generatingReport ? 'Generating Report...' : 'Download PDF Report'}</span>
+              </button>
             </div>
           )}
         </div>
