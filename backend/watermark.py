@@ -1,72 +1,48 @@
 import os
+from reportlab.pdfgen.canvas import Canvas
+from reportlab.lib import colors
 from reportlab.lib.utils import ImageReader
 
-def add_watermark(c, width, height):
+# Resolve logo path once at import time
+_LOGO_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "..", "frontend", "src", "assets", "nirikshalogo.png",
+)
+
+
+def add_watermark(c: Canvas, width: float, height: float):
+    """
+    Add a tiled diagonal 'NIRIKSHA' watermark grid with a centred logo
+    to the current PDF page.
+    """
     c.saveState()
-    
-    # Force a visibly darker gray
-    c.setFillColorRGB(0.6, 0.6, 0.6)
-    try:
-        # Increased opacity to make it darker/more prominent
-        c.setFillAlpha(0.22)
-    except AttributeError:
-        pass
 
-    # Orient to the center of the page and slope upward 45 degrees
-    c.translate(width / 2.0, height / 2.0)
-    c.rotate(45)
+    # ── Tiled text watermarks ────────────────────────────────────────
+    c.setFillColor(colors.Color(0, 0, 0, alpha=0.035))
+    c.setFont("Helvetica-Bold", 38)
 
-    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    logo_path = os.path.join(base_dir, "frontend", "src", "assets", "nirikshalogo.png")
-    
-    # We load image logic beforehand
-    has_logo = os.path.exists(logo_path)
-    img = None
-    if has_logo:
+    spacing_x = 220
+    spacing_y = 180
+
+    for x in range(-100, int(width) + 200, spacing_x):
+        for y in range(-100, int(height) + 200, spacing_y):
+            c.saveState()
+            c.translate(x, y)
+            c.rotate(40)
+            c.drawCentredString(0, 0, "NIRIKSHA")
+            c.restoreState()
+
+    # ── Centre logo watermark ────────────────────────────────────────
+    if os.path.isfile(_LOGO_PATH):
         try:
-            img = ImageReader(logo_path)
+            logo = ImageReader(_LOGO_PATH)
+            logo_w, logo_h = 120, 120
+            lx = (width - logo_w) / 2
+            ly = (height - logo_h) / 2
+            c.setFillAlpha(0.06)
+            c.drawImage(logo, lx, ly, width=logo_w, height=logo_h,
+                        preserveAspectRatio=True, mask='auto')
         except Exception:
-            has_logo = False
-
-    font_size = 40
-    c.setFont("Helvetica-Bold", font_size)
-    text = "Niriksha AI"
-
-    # Evaluate lengths to calculate proper repeating spacing
-    text_width = c.stringWidth(text, "Helvetica-Bold", font_size)
-    logo_size = 45
-    spacing = 15
-
-    group_width = text_width + (logo_size + spacing if has_logo else 0)
-    
-    # Distance between instances (reduced for a tighter grid)
-    x_space = group_width + 80
-    y_space = font_size + 90
-
-    # Ensure our drawing boundaries go miles beyond the edges of the page,
-    # so rotating doesn't leave the corners blank.
-    max_dist = max(width, height) * 2.0
-    start_x = -max_dist
-    end_x = max_dist
-    start_y = -max_dist
-    end_y = max_dist
-
-    # Draw the dynamic grid
-    y = start_y
-    row_offset = 0
-
-    while y < end_y:
-        # Stagger every other row
-        x = start_x + (row_offset % 2) * (x_space / 2.0)
-        while x < end_x:
-            current_x = x
-            if has_logo and img:
-                c.drawImage(img, current_x, y - (logo_size * 0.25), width=logo_size, height=logo_size, mask='auto')
-                current_x += logo_size + spacing
-            c.drawString(current_x, y, text)
-            x += x_space
-            
-        y += y_space
-        row_offset += 1
+            pass  # degrade gracefully if logo can't be read
 
     c.restoreState()

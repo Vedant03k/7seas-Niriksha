@@ -21,10 +21,12 @@ class AudioDeepfakeDetector:
     """
 
     # --- Ensemble weights (neural model is dominant, stats are supplementary) ---
-    W_NEURAL  = 0.45
-    W_SPECTRAL = 0.20
+    W_NEURAL  = 0.40
+    W_SPECTRAL = 0.15
+    W_SPECTRAL_CONSISTENCY = 0.10
     W_MFCC    = 0.15
-    W_PITCH   = 0.20
+    W_PITCH   = 0.15
+    W_SILENCE = 0.05
 
     def __init__(self):
         # Prefer locally fine-tuned model, fall back to HuggingFace remote model
@@ -405,6 +407,45 @@ class AudioDeepfakeDetector:
         combined = float(np.mean(scores)) if scores else 0.0
         return min(combined, 1.0), artifacts
 
+    # ── Layer 6: Silence pattern analysis ─────────────────────────────────
+
+    @staticmethod
+    def _silence_score(audio: np.ndarray, sr: int = 16000) -> float:
+        """
+        TTS-generated audio often has perfectly uniform silence gaps.
+        Real speech has irregular pauses with ambient noise.
+        Returns a fake-likelihood score [0, 1].
+        """
+        frame_len = int(0.025 * sr)
+        hop = int(0.010 * sr)
+        threshold = 0.01
+
+        silent_lengths = []
+        current_silent = 0
+        for start in range(0, len(audio) - frame_len, hop):
+            frame = audio[start:start + frame_len]
+            rms = float(np.sqrt(np.mean(frame ** 2)))
+            if rms < threshold:
+                current_silent += 1
+            else:
+                if current_silent > 0:
+                    silent_lengths.append(current_silent)
+                current_silent = 0
+        if current_silent > 0:
+            silent_lengths.append(current_silent)
+
+        if len(silent_lengths) < 2:
+            return 0.0
+
+        arr = np.array(silent_lengths, dtype=float)
+        cv = float(np.std(arr) / np.mean(arr)) if np.mean(arr) > 0 else 1.0
+        # Very low coefficient of variation = suspiciously uniform pauses
+        if cv < 0.15:
+            return 0.5
+        elif cv < 0.30:
+            return 0.25
+        return 0.0
+
     # ── Ensemble & Final Verdict ──────────────────────────────────────────
 
     def analyze_audio(self, file_path: str):
@@ -441,12 +482,20 @@ class AudioDeepfakeDetector:
             # Layer 4: Pitch/prosody analysis
             pitch_fake, pitch_artifacts = self._pitch_score(audio, sr)
 
+            # Layer 5: Spectral consistency
+            spectral_cons_fake, spectral_cons_artifacts = self._spectral_consistency_score(audio, sr)
+
+            # Layer 6: Silence analysis
+            silence_fake = self._silence_score(audio, sr)
+
             # Weighted ensemble
             ensemble_fake = (
                 self.W_NEURAL  * neural_fake +
                 self.W_SPECTRAL * spectral_fake +
+                self.W_SPECTRAL_CONSISTENCY * spectral_cons_fake +
                 self.W_MFCC    * mfcc_fake +
-                self.W_PITCH   * pitch_fake
+                self.W_PITCH   * pitch_fake +
+                self.W_SILENCE * silence_fake
             )
 
             # Anomaly-based boost: non-neural layers detect artifacts that
