@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { Activity, Layers, Image as ImageIcon, FileVideo, Music, FileText, LogOut, LogIn, Loader2, Zap } from 'lucide-react';
 import { useAuth0 } from '@auth0/auth0-react';
 import DetectorTab from './components/DetectorTab';
@@ -12,6 +12,9 @@ function App() {
   const { isAuthenticated, isLoading, loginWithRedirect, logout, user } = useAuth0();
   const [activeTab, setActiveTab] = useState<TabType>('COMBINED');
   const [credits, setCredits] = useState<number>(1000);
+  const [pictureFailed, setPictureFailed] = useState(false);
+
+  const handlePictureError = useCallback(() => setPictureFailed(true), []);
 
   const TABS = [
     { id: 'COMBINED', label: 'All-in-One Detector', icon: Layers, accept: 'image/*,video/*,audio/*', desc: 'Upload any image, video, or audio file. Our multimodal AI engine will automatically route it to the appropriate model for deepfake analysis.' },
@@ -79,8 +82,15 @@ function App() {
             </div>
 
             <div className="hidden sm:flex items-center space-x-3 bg-white/60 px-5 py-2.5 rounded-[1.5rem] shadow-[4px_4px_8px_rgba(170,190,230,0.3),inset_-2px_-2px_4px_rgba(170,190,230,0.2),inset_2px_2px_4px_white]">
-              {user?.picture ? (
-                <img src={user.picture} alt={user?.name || 'User'} className="w-10 h-10 rounded-full shadow-inner" />
+              {user?.picture && !pictureFailed ? (
+                <img
+                  src={user.picture}
+                  alt={user?.name || 'User'}
+                  className="w-10 h-10 rounded-full shadow-inner"
+                  referrerPolicy="no-referrer"
+                  crossOrigin="anonymous"
+                  onError={handlePictureError}
+                />
               ) : (
                 <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold border-2 border-white shadow-inner">
                   {user?.name?.[0]?.toUpperCase() || 'U'}
