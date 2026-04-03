@@ -1,5 +1,10 @@
 # Niriksha-deepfake
 
+## Team: 7seas
+
+- **Leader:** Vedant Kale
+- **Members:** Amrita Kumari, Pruthviraj Rajput, Omkar Madakar
+
 ## System Architecture & Setup
 
 This repository contains the full stack implementation of a deepfake detection system.
