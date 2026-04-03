@@ -349,6 +349,18 @@ export default function ImageDetectorTab() {
             );
           })()}
 
+          <div className="flex flex-col sm:flex-row justify-between items-center bg-blue-900/20 border border-blue-500/30 rounded-xl p-4 gap-4">
+            <div className="text-blue-200 text-sm font-medium flex items-center gap-2">
+              <span>🛡️</span> Get a detailed forensic record of this analysis
+            </div>
+            <button
+              onClick={downloadPDF}
+              className="w-full sm:w-auto py-2.5 px-5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold rounded-xl shadow-lg transition-all duration-200 flex items-center justify-center gap-2"
+            >
+              <span>📄</span> Download PDF Report
+            </button>
+          </div>
+
           <div className="flex gap-1 bg-white/5 rounded-xl p-1 overflow-x-auto">
             {(["overview", "heatmap", "fft", "metadata", "legal"] as const).map(
               (tab) => (
