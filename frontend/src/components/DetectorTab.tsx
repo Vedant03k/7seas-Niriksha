@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { UploadCloud, FileVideo, Image as ImageIcon, CheckCircle, AlertOctagon, Activity, FileAudio, Zap, Crown } from 'lucide-react';
+import { UploadCloud, FileVideo, Image as ImageIcon, CheckCircle, AlertOctagon, Activity, FileAudio, FileText, Zap, Crown } from 'lucide-react';
 
 interface DetectorTabProps {
   acceptType: string;
@@ -39,45 +39,65 @@ export default function DetectorTab({ acceptType, typeLabel, description, credit
     setResult(null);
     setShowPaywall(false);
     
-    // If it's an audio file, send it to the real backend
-    if (file.type.includes('audio')) {
-      const formData = new FormData();
-      formData.append('file', file);
+    let endpoint = "";
+    if (file.type.includes('audio')) endpoint = "http://127.0.0.1:8000/analyze/audio";
+    else if (file.type.includes('video')) endpoint = "http://127.0.0.1:8000/analyze/video";
+    else throw new Error("Unsupported filetype");
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) throw new Error('API processing failed');
+
+      const data = await response.json();
+      setResult(data);
+      setCredits(credits - cost);
+    } catch (error: any) {
+      console.error('Error analyzing media:', error);
+      setResult({
+        verdict: 'ERROR',
+        confidence: 0,
+        media_type: file.type.includes('audio') ? 'audio' : 'video',
+        artifacts_detected: ['Connection Error'],
+        explanation: 'Could not connect to the backend. Make sure FastAPI server runs on port 8000.'
+      });
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  const handleDownloadReport = async () => {
+    if (!result) return;
+    try {
+      const resp = await fetch('http://127.0.0.1:8000/generate/report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          verdict: result.verdict,
+          confidence: result.confidence,
+          media_type: result.media_type,
+          artifacts_detected: result.artifacts_detected || [],
+          explanation: result.explanation || ''
+        })
+      });
+      if (!resp.ok) throw new Error('Failed to generate report');
       
-      try {
-        const response = await fetch('/api/analyze/audio', {
-          method: 'POST',
-          body: formData,
-        });
-        
-        const data = await response.json();
-        setResult(data);
-        setCredits(credits - cost);
-      } catch (error: any) {
-        console.error('Error analyzing audio:', error);
-        setResult({
-          verdict: 'ERROR',
-          confidence: 0,
-          media_type: 'audio',
-          artifacts_detected: ['Connection Error'],
-          explanation: 'Could not connect to the backend. Make sure the FastAPI server is running on port 8000.'
-        });
-      } finally {
-        setAnalyzing(false);
-      }
-    } else {
-      // Mock API call to backend for images and video for now until those endpoints are built
-      setTimeout(() => {
-        setResult({
-          verdict: 'FAKE',
-          confidence: 0.94,
-          media_type: file.type.includes('video') ? 'video' : 'image',
-          artifacts_detected: ['GAN grid pattern anomalies', 'boundary inconsistency detected'],
-          explanation: `Suspicious high-frequency artifacts detected in the ${typeLabel.toLowerCase()} source structure.`
-        });
-        setCredits(credits - cost);
-        setAnalyzing(false);
-      }, 2000);
+      const blob = await resp.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `Niriksha_Report_${Date.now()}.pdf`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } catch (err) {
+      console.error('Download report error:', err);
     }
   };
 
@@ -171,9 +191,20 @@ export default function DetectorTab({ acceptType, typeLabel, description, credit
       {/* Results Display */}
       {result && (
         <div className="clay-card p-8 md:p-10 space-y-8 mt-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-          <h2 className="text-3xl font-extrabold flex items-center space-x-2 text-slate-800 border-b border-slate-200 pb-5">
-            <span>Analysis Results</span>
-          </h2>
+          <div className="flex items-center justify-between border-b border-slate-200 pb-5">
+            <h2 className="text-3xl font-extrabold flex items-center space-x-2 text-slate-800">
+              <span>Analysis Results</span>
+            </h2>
+            {result.verdict === 'FAKE' && (
+              <button 
+                onClick={handleDownloadReport}
+                className="clay-btn bg-slate-800 text-white hover:bg-slate-700 px-5 py-2.5 rounded-xl flex items-center space-x-2 font-bold transition-all shadow-[4px_4px_8px_rgba(15,23,42,0.3),inset_-2px_-2px_4px_rgba(15,23,42,0.5),inset_2px_2px_4px_rgba(148,163,184,0.4)]"
+              >
+                <FileText size={20} />
+                <span>Export PDF Report</span>
+              </button>
+            )}
+          </div>
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
             {/* Verdict Card */}
