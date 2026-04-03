@@ -298,14 +298,14 @@ class ImageDeepfakeDetector:
                 real_prob = float(probs[1])
 
                 # Calibration for typical WhatsApp compression (which spikes false positives)
-                # True AI images score > 0.8. High compression real images score ~0.5-0.7.
-                # Only suppress the score if it's squarely in the uncertain zone
-                if fake_prob < 0.55:
-                    fake_prob = fake_prob * 0.2
-                    real_prob = 1.0 - fake_prob
-                elif fake_prob < 0.75:
-                    fake_prob = fake_prob * 0.75
-                    real_prob = 1.0 - fake_prob
+                # We apply a slight curve to pull uncertain scores (0.3-0.5) down slightly,
+                # but leave scores > 0.55 intact so we don't miss Gemini/Midjourney generations.
+                if fake_prob < 0.40:
+                    fake_prob = fake_prob * 0.4
+                elif fake_prob < 0.55:
+                    fake_prob = fake_prob * 0.8
+                
+                real_prob = 1.0 - fake_prob
 
             fft_result = analyze_frequency_domain(pil_img)
             face_regions = detect_face_regions(pil_img)
@@ -316,27 +316,26 @@ class ImageDeepfakeDetector:
             meta_contrib = 0.10 if metadata["metadata_suspicious"] else 0.0
             
             # Increase model weight because Organika/sdxl-detector is extremely accurate
-            model_contrib = fake_prob * 0.75
+            model_contrib = fake_prob * 0.85
             ensemble_score = min(model_contrib + fft_contrib + meta_contrib, 1.0)
             
             # Short-circuit logic: if the SOTA model is highly confident, we trust it over the ensemble
-            if fake_prob > 0.85:
+            if fake_prob > 0.75:
                 ensemble_score = max(ensemble_score, fake_prob)
-            elif real_prob > 0.85:
+            elif real_prob > 0.75:
                 ensemble_score = min(ensemble_score, 1.0 - real_prob)
-
+            
             gradcam_b64 = ""
-            if ensemble_score > 0.4 or face_count > 0:
+            if ensemble_score > 0.35 or face_count > 0:
                 gradcam_b64 = generate_gradcam(self.model, tensor, pil_img)
-
-            if ensemble_score >= 0.65:
+            
+            # Adjusted thresholds to capture Gemini/Midjourney generations that score ~0.55 raw
+            if ensemble_score >= 0.55:
                 verdict = "FAKE"
-            elif ensemble_score >= 0.45:
+            elif ensemble_score >= 0.35:
                 verdict = "UNCERTAIN"
             else:
-                verdict = "REAL"
-
-            artifacts = []
+                verdict = "REAL"            artifacts = []
             if fft_result["has_gan_grid"]:
                 artifacts.append("GAN grid pattern (frequency domain)")
             if fft_result["fft_anomaly_score"] > 0.5:
