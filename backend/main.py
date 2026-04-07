@@ -23,6 +23,9 @@ app.include_router(image_router)
 from routes.document import router as document_router
 app.include_router(document_router)
 
+from routes.waha import router as waha_router
+app.include_router(waha_router)
+
 # CORS - allow all origins for development
 app.add_middleware(
     CORSMiddleware,

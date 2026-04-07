@@ -472,6 +472,5 @@ def _build_whatsapp_reply(
         f"*Verdict:* {icon} {verdict} ({confidence*100:.1f}% confidence)\n"
         f"*Type:* {manipulation['type']}\n"
         f"*Key Artifact:* {art_summary}\n\n"
-        f"{'❌ Do NOT forward this media.' if verdict == 'FAKE' else '✅ Media appears authentic.'}\n"
-        f"_Powered by DeepShield AI_"
+        f"{'❌ Do NOT forward this media.' if verdict == 'FAKE' else '✅ Media appears authentic.'}"
     )
